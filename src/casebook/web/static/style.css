@@ -128,9 +128,13 @@ body {
   cursor: pointer;
   font-weight: 600;
 }
+.agent-head .rename,
+.agent-head .autoname,
 .agent-head .close,
 .agent-head .delete { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; }
 .agent-head .close { font-size: 16px; }
+.agent-head .rename:hover,
+.agent-head .autoname:hover,
 .agent-head .close:hover,
 .agent-head .delete:hover { color: var(--text); }
 

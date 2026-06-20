@@ -18,6 +18,7 @@ from typing import Optional
 from watchfiles import awatch
 
 from . import cases, config, storage, templates
+from .engine import oneshot
 from .engine.events import EventBus
 from .engine.session import AgentSession, SessionManager
 
@@ -28,6 +29,12 @@ _REPLAYABLE = {"message", "tool_call", "notice", "plan"}
 
 def _now_iso() -> str:
     return datetime.datetime.now().isoformat()
+
+
+def _clean_name(reply: str) -> str:
+    """Reduce a model reply to a single short label."""
+    first_line = reply.strip().splitlines()[0] if reply.strip() else ""
+    return first_line.strip().strip("\"'").strip()[:80]
 
 
 def _auto_allow_option(options: list[dict]) -> Optional[str]:
@@ -226,6 +233,58 @@ class CaseCoordinator:
             raise
         self._acp_ids[agent_id] = session.acp_session_id
         self._persist_meta(agent_id)
+
+    def rename_agent(self, agent_id: str, label: str) -> None:
+        agent = self._agents.get(agent_id)
+        label = (label or "").strip()
+        if agent is None or not label:
+            return
+        agent["label"] = label
+        self._persist_meta(agent_id)
+        self._emit({"type": "agent_updated", **agent})
+
+    async def name_agent(self, agent_id: str) -> None:
+        """Ask the model to name a session from its transcript (configurable prompt)."""
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise cases.CasebookError(f"no such session: {agent_id}")
+        transcript_text = self._transcript_text(agent_id)
+        if not transcript_text.strip():
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": "nothing to name yet — the session has no messages"})
+            return
+        try:
+            backend = self.config.select_backend(agent["backend"] or None)
+        except KeyError as error:
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"cannot name session: {error}"})
+            return
+        prompt = f"{self.config.naming_prompt}\n\n--- transcript ---\n{transcript_text}"
+        self._emit({"type": "notice", "agent_id": agent_id,
+                    "case_id": agent["case_id"], "message": "naming session…"})
+        try:
+            reply = await oneshot.one_shot(backend, self.project_root, prompt)
+        except Exception as error:
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"naming failed: {error}"})
+            return
+        name = _clean_name(reply)
+        if name:
+            self.rename_agent(agent_id, name)
+
+    def _transcript_text(self, agent_id: str, limit: int = 6000) -> str:
+        """Plain user/agent text of a session, most recent `limit` characters."""
+        lines = []
+        for event in self._transcripts.get(agent_id, []):
+            if event.get("type") != "message" or event.get("system"):
+                continue
+            role = event.get("role")
+            if role in ("user", "agent"):
+                lines.append(f"{role}: {event.get('text', '')}")
+        return "\n".join(lines)[-limit:]
 
     async def send(self, agent_id: str, text: str) -> None:
         session = self.sessions.get(agent_id)

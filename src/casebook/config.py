@@ -39,6 +39,15 @@ PROJECT_CONFIG_RELATIVE_PATH = ".casebook/config.toml"
 ECHO_BACKEND_NAME = "echo"
 CLAUDE_BACKEND_NAME = "claude"
 
+# The instructions handed to the model when asked to name a session. Override it
+# in config.toml with a top-level `naming_prompt = "..."`.
+DEFAULT_NAMING_PROMPT = (
+    "You are naming a work session based on the transcript that follows. "
+    "Reply with a single concise, descriptive title of at most six words. "
+    "No surrounding quotes, no trailing punctuation, no preamble — reply with "
+    "only the title."
+)
+
 
 @dataclass(frozen=True)
 class Backend:
@@ -85,6 +94,7 @@ class Config:
 
     backends: dict[str, Backend]
     default_backend: str
+    naming_prompt: str = DEFAULT_NAMING_PROMPT
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend
@@ -138,4 +148,8 @@ def load_config(project_root: Optional[Path] = None) -> Config:
     if default is None:
         # Prefer a real backend (claude) when present; fall back to echo.
         default = CLAUDE_BACKEND_NAME if CLAUDE_BACKEND_NAME in backends else ECHO_BACKEND_NAME
-    return Config(backends=backends, default_backend=default)
+    return Config(
+        backends=backends,
+        default_backend=default,
+        naming_prompt=data.get("naming_prompt", DEFAULT_NAMING_PROMPT),
+    )

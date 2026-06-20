@@ -140,6 +140,8 @@ function buildPane(agent) {
     <div class="agent-head">
       <span class="label"></span>
       <span class="state"></span>
+      <button class="rename" title="rename session">✎</button>
+      <button class="autoname" title="name session with the model">✨</button>
       <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
       <button class="resume" hidden>Resume</button>
       <button class="close" title="close session (keep history)">×</button>
@@ -172,6 +174,12 @@ function buildPane(agent) {
   cancelBtn.onclick = () => send({ action: "cancel", agent_id: agent.agent_id });
   const allowInput = root.querySelector(".allow input");
   allowInput.onchange = () => send({ action: "set_always_allow", agent_id: agent.agent_id, value: allowInput.checked });
+  root.querySelector(".rename").onclick = () => {
+    const current = (state.agents.get(agent.agent_id) || agent).label;
+    const label = prompt("Session name:", current);
+    if (label && label.trim()) send({ action: "rename_agent", agent_id: agent.agent_id, label: label.trim() });
+  };
+  root.querySelector(".autoname").onclick = () => send({ action: "name_agent", agent_id: agent.agent_id });
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => {

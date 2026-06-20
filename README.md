@@ -26,6 +26,9 @@ additional backends in `~/.config/casebook/config.toml` (respecting
 ```toml
 default = "claude"
 
+# Instructions used by the "name session" button (optional; shown is the default).
+naming_prompt = "Reply with a concise title of at most six words for this session."
+
 [backends.claude]
 command = ["claude-code-acp"]
 

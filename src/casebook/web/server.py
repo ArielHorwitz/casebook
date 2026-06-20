@@ -110,6 +110,10 @@ def _dispatch(engine: CaseCoordinator, action: dict) -> None:
                                 action.get("backend")))
     elif name == "resume_agent":
         _spawn(engine.resume_agent(action["agent_id"]))
+    elif name == "rename_agent":
+        engine.rename_agent(action["agent_id"], action.get("label", ""))
+    elif name == "name_agent":
+        _spawn(engine.name_agent(action["agent_id"]))
     elif name == "send":
         _spawn(engine.send(action["agent_id"], action["text"]))
     elif name == "cancel":

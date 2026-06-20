@@ -29,6 +29,10 @@ default = "claude"
 # Instructions used by the "name session" button (optional; shown is the default).
 naming_prompt = "Reply with a concise title of at most six words for this session."
 
+# Preferred model, applied at session start when the backend advertises a match
+# (matches a model id or name, case-insensitively). Optional.
+default_model = "opus 4.8"
+
 [backends.claude]
 command = ["claude-code-acp"]
 

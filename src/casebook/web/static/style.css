@@ -109,6 +109,15 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .agent-head .label { font-weight: 600; }
+.agent-head .model {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 4px;
+  max-width: 140px;
+}
 .agent-head .state { font-size: 11px; color: var(--muted); margin-left: auto; }
 .agent-head .state.working { color: var(--accent); }
 .agent-head .allow {

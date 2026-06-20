@@ -95,6 +95,7 @@ class Config:
     backends: dict[str, Backend]
     default_backend: str
     naming_prompt: str = DEFAULT_NAMING_PROMPT
+    default_model: Optional[str] = None
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend
@@ -152,4 +153,5 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         backends=backends,
         default_backend=default,
         naming_prompt=data.get("naming_prompt", DEFAULT_NAMING_PROMPT),
+        default_model=data.get("default_model"),
     )

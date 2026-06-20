@@ -31,6 +31,20 @@ def _now_iso() -> str:
     return datetime.datetime.now().isoformat()
 
 
+def _match_model(preference: Optional[str], available: list[dict]) -> Optional[str]:
+    """Resolve a loose model preference (id or name substring) to an available id."""
+    if not preference or not available:
+        return None
+    ids = [model["model_id"] for model in available]
+    if preference in ids:
+        return preference
+    lowered = preference.lower()
+    for model in available:
+        if lowered in model["model_id"].lower() or lowered in (model.get("name") or "").lower():
+            return model["model_id"]
+    return None
+
+
 def _clean_name(reply: str) -> str:
     """Reduce a model reply to a single short label."""
     first_line = reply.strip().splitlines()[0] if reply.strip() else ""
@@ -58,6 +72,7 @@ class CaseCoordinator:
         self._transcripts: dict[str, list[dict]] = {}
         self._acp_ids: dict[str, Optional[str]] = {}
         self._created: dict[str, Optional[str]] = {}
+        self._models: dict[str, list[dict]] = {}
         self._permissions: dict[str, asyncio.Future] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
@@ -71,6 +86,7 @@ class CaseCoordinator:
                 "case_id": meta["case_id"],
                 "label": meta.get("label", agent_id),
                 "backend": meta.get("backend", ""),
+                "model": meta.get("model"),
                 "always_allow": bool(meta.get("always_allow", False)),
                 "state": "stored",
                 "live": False,
@@ -97,6 +113,7 @@ class CaseCoordinator:
                 "case_id": agent["case_id"],
                 "label": agent["label"],
                 "backend": agent["backend"],
+                "model": agent.get("model"),
                 "always_allow": agent.get("always_allow", False),
                 "acp_session_id": self._acp_ids.get(agent_id),
                 "created": self._created.get(agent_id),
@@ -163,6 +180,7 @@ class CaseCoordinator:
             "case_id": case.case_id,
             "label": label,
             "backend": backend.name,
+            "model": None,
             "always_allow": False,
             "state": "starting",
             "live": True,
@@ -185,6 +203,7 @@ class CaseCoordinator:
                         "message": f"failed to start agent: {error}"})
             raise
         self._acp_ids[agent_id] = session.acp_session_id
+        await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
         return agent_id
 
@@ -232,7 +251,42 @@ class CaseCoordinator:
                         "message": f"failed to resume session: {error}"})
             raise
         self._acp_ids[agent_id] = session.acp_session_id
+        await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
+
+    async def _apply_models(self, agent_id: str, session: AgentSession) -> None:
+        """Apply the configured default-model preference and publish the model list."""
+        desired = _match_model(self.config.default_model, session.available_models)
+        if desired and desired != session.current_model:
+            try:
+                await session.set_model(desired)
+            except Exception as error:
+                self._emit({"type": "notice", "agent_id": agent_id,
+                            "case_id": self._agents[agent_id]["case_id"],
+                            "message": f"could not select default model: {error}"})
+        self._models[agent_id] = session.available_models
+        self._agents[agent_id]["model"] = session.current_model
+        self._emit({"type": "models", "agent_id": agent_id,
+                    "case_id": self._agents[agent_id]["case_id"],
+                    "available": session.available_models,
+                    "current": session.current_model})
+
+    async def set_model(self, agent_id: str, model_id: str) -> None:
+        session = self.sessions.get(agent_id)
+        agent = self._agents.get(agent_id)
+        if session is None or agent is None:
+            return
+        try:
+            await session.set_model(model_id)
+        except Exception as error:
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"could not set model: {error}"})
+            return
+        agent["model"] = model_id
+        self._persist_meta(agent_id)
+        self._emit({"type": "models", "agent_id": agent_id, "case_id": agent["case_id"],
+                    "available": self._models.get(agent_id, []), "current": model_id})
 
     def rename_agent(self, agent_id: str, label: str) -> None:
         agent = self._agents.get(agent_id)
@@ -306,6 +360,7 @@ class CaseCoordinator:
         if agent is not None:
             agent["state"] = "stored"
             agent["live"] = False
+            self._models.pop(agent_id, None)
             self._persist_meta(agent_id)
             self._emit({"type": "agent_updated", **agent})
 
@@ -316,6 +371,7 @@ class CaseCoordinator:
         self._transcripts.pop(agent_id, None)
         self._acp_ids.pop(agent_id, None)
         self._created.pop(agent_id, None)
+        self._models.pop(agent_id, None)
         if session is not None:
             await session.stop()
         if agent is not None:
@@ -381,6 +437,7 @@ class CaseCoordinator:
             "type": "snapshot",
             "agents": list(self._agents.values()),
             "transcripts": self._transcripts,
+            "models": self._models,
         }
 
     async def shutdown(self) -> None:

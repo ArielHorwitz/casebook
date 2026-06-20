@@ -21,9 +21,18 @@ from acp.schema import (
     AgentCapabilities,
     AgentMessageChunk,
     InitializeResponse,
+    ModelInfo,
     NewSessionResponse,
     PromptResponse,
+    SessionModelState,
+    SetSessionModelResponse,
 )
+
+# Two pretend models, so model selection is demonstrable without a real backend.
+_MODELS = [
+    ModelInfo(model_id="echo-small", name="Echo Small"),
+    ModelInfo(model_id="echo-large", name="Echo Large"),
+]
 
 
 class EchoAgent:
@@ -31,6 +40,7 @@ class EchoAgent:
 
     def __init__(self, connection: AgentSideConnection) -> None:
         self._connection = connection
+        self._model_by_session: dict[str, str] = {}
 
     async def initialize(self, protocol_version: int, **kwargs: Any) -> InitializeResponse:
         return InitializeResponse(
@@ -40,14 +50,28 @@ class EchoAgent:
         )
 
     async def new_session(self, cwd: str, **kwargs: Any) -> NewSessionResponse:
-        return NewSessionResponse(session_id=f"echo-{uuid.uuid4().hex}")
+        session_id = f"echo-{uuid.uuid4().hex}"
+        self._model_by_session[session_id] = _MODELS[0].model_id
+        return NewSessionResponse(
+            session_id=session_id,
+            models=SessionModelState(
+                available_models=_MODELS, current_model_id=_MODELS[0].model_id
+            ),
+        )
+
+    async def set_session_model(
+        self, model_id: str, session_id: str, **kwargs: Any
+    ) -> SetSessionModelResponse:
+        self._model_by_session[session_id] = model_id
+        return SetSessionModelResponse()
 
     async def prompt(self, prompt: list, session_id: str, **kwargs: Any) -> PromptResponse:
         text = "".join(getattr(block, "text", "") for block in prompt)
+        model = self._model_by_session.get(session_id, _MODELS[0].model_id)
         await self._connection.session_update(
             session_id=session_id,
             update=AgentMessageChunk(
-                content=text_block(f"echo: {text}"),
+                content=text_block(f"echo[{model}]: {text}"),
                 session_update="agent_message_chunk",
             ),
         )
@@ -60,7 +84,11 @@ class EchoAgent:
 async def _main() -> None:
     reader, writer = await stdio_streams()
     connection = AgentSideConnection(
-        lambda conn: EchoAgent(conn), writer, reader, listening=False
+        lambda conn: EchoAgent(conn),
+        writer,
+        reader,
+        listening=False,
+        use_unstable_protocol=True,
     )
     await connection.listen()
 

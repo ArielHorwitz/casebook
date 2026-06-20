@@ -4,8 +4,9 @@
 const state = {
   ws: null,
   activeCase: null,
-  agents: new Map(), // agent_id -> {agent_id, case_id, label, backend, state}
+  agents: new Map(), // agent_id -> {agent_id, case_id, label, backend, model, state, live}
   transcripts: new Map(), // agent_id -> [item]
+  models: new Map(), // agent_id -> {available: [{model_id, name}], current}
   panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
 };
 
@@ -52,6 +53,9 @@ function handleEvent(event) {
       return upsertAgent(event);
     case "agent_removed":
       return removeAgent(event.agent_id);
+    case "models":
+      state.models.set(event.agent_id, { available: event.available || [], current: event.current });
+      return renderModel(event.agent_id);
     case "files_changed":
       if (event.case_id === state.activeCase) renderFiles(event.files);
       return;
@@ -63,9 +67,14 @@ function handleEvent(event) {
 function applySnapshot(snapshot) {
   state.agents.clear();
   state.transcripts.clear();
+  state.models.clear();
   for (const [agentId, pane] of state.panes) pane.root.remove();
   state.panes.clear();
   for (const agent of snapshot.agents) upsertAgent(agent);
+  for (const [agentId, models] of Object.entries(snapshot.models || {})) {
+    state.models.set(agentId, { available: models, current: (state.agents.get(agentId) || {}).model });
+    renderModel(agentId);
+  }
   for (const [agentId, events] of Object.entries(snapshot.transcripts || {})) {
     for (const event of events) applyToTranscript(event);
   }
@@ -85,6 +94,7 @@ function removeAgent(agentId) {
   state.panes.delete(agentId);
   state.agents.delete(agentId);
   state.transcripts.delete(agentId);
+  state.models.delete(agentId);
 }
 
 // Mutate the transcript array, then re-render just that agent's transcript.
@@ -139,6 +149,7 @@ function buildPane(agent) {
   root.innerHTML = `
     <div class="agent-head">
       <span class="label"></span>
+      <select class="model" title="model" hidden></select>
       <span class="state"></span>
       <button class="rename" title="rename session">✎</button>
       <button class="autoname" title="name session with the model">✨</button>
@@ -180,6 +191,8 @@ function buildPane(agent) {
     if (label && label.trim()) send({ action: "rename_agent", agent_id: agent.agent_id, label: label.trim() });
   };
   root.querySelector(".autoname").onclick = () => send({ action: "name_agent", agent_id: agent.agent_id });
+  const modelSelect = root.querySelector(".model");
+  modelSelect.onchange = () => send({ action: "set_model", agent_id: agent.agent_id, model_id: modelSelect.value });
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => {
@@ -196,6 +209,7 @@ function buildPane(agent) {
     cancelBtn,
     composer: root.querySelector(".composer"),
     resumeBtn: root.querySelector(".resume"),
+    modelSelect,
     allowInput,
     stateEl: root.querySelector(".state"),
     labelEl: root.querySelector(".label"),
@@ -203,6 +217,27 @@ function buildPane(agent) {
   state.panes.set(agent.agent_id, pane);
   applyPaneVisibility();
   renderTranscript(agent.agent_id);
+  renderModel(agent.agent_id);
+}
+
+function renderModel(agentId) {
+  const pane = state.panes.get(agentId);
+  if (!pane) return;
+  const models = state.models.get(agentId);
+  const select = pane.modelSelect;
+  const available = (models && models.available) || [];
+  if (available.length === 0) {
+    select.hidden = true;
+    return;
+  }
+  select.replaceChildren(...available.map((m) => {
+    const option = document.createElement("option");
+    option.value = m.model_id;
+    option.textContent = m.name || m.model_id;
+    return option;
+  }));
+  if (models.current) select.value = models.current;
+  select.hidden = false;
 }
 
 function updateHead(agentId) {

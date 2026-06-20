@@ -46,10 +46,37 @@ class AgentSession:
     _busy: bool = field(default=False, init=False)
     _supports_load: bool = field(default=False, init=False)
     _suppress_emit: bool = field(default=False, init=False)
+    available_models: list[dict] = field(default_factory=list, init=False)
+    current_model: Optional[str] = field(default=None, init=False)
 
     @property
     def acp_session_id(self) -> Optional[str]:
         return self._acp_session_id
+
+    def _capture_models(self, response: Any) -> None:
+        """Record the advertised model list and current model from a session response."""
+        state = getattr(response, "models", None)
+        if state is None:
+            self.available_models = []
+            self.current_model = None
+            return
+        self.available_models = [
+            {
+                "model_id": model.model_id,
+                "name": model.name,
+                "description": getattr(model, "description", None),
+            }
+            for model in (state.available_models or [])
+        ]
+        self.current_model = getattr(state, "current_model_id", None)
+
+    async def set_model(self, model_id: str) -> None:
+        if self._conn is None or self._acp_session_id is None:
+            return
+        await self._conn.set_session_model(
+            model_id=model_id, session_id=self._acp_session_id
+        )
+        self.current_model = model_id
 
     def _guarded_emit(self, event: dict) -> None:
         # Dropped while replaying a loaded session — that history is already on
@@ -95,6 +122,7 @@ class AgentSession:
             cwd=str(self.project_root), mcp_servers=[]
         )
         self._acp_session_id = session.session_id
+        self._capture_models(session)
         await self.send(system_instructions, system=True)
 
     async def resume(
@@ -113,19 +141,21 @@ class AgentSession:
             self._acp_session_id = acp_session_id
             self._suppress_emit = True
             try:
-                await self._conn.load_session(
+                loaded = await self._conn.load_session(
                     cwd=str(self.project_root),
                     session_id=acp_session_id,
                     mcp_servers=[],
                 )
             finally:
                 self._suppress_emit = False
+            self._capture_models(loaded)
             self._set_state("idle")
         else:
             session = await self._conn.new_session(
                 cwd=str(self.project_root), mcp_servers=[]
             )
             self._acp_session_id = session.session_id
+            self._capture_models(session)
             self._notify(
                 "previous agent context could not be restored (backend does not "
                 "support session loading); the visible history is preserved but "

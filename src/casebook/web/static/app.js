@@ -98,7 +98,7 @@ function applyToTranscript(event) {
     if (streaming && last && last.kind === "message" && last.role === event.role && last.streaming) {
       last.text += event.text;
     } else {
-      items.push({ kind: "message", role: event.role, text: event.text, streaming, preamble: event.preamble });
+      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system });
     }
   } else if (event.type === "tool_call") {
     const existing = items.find((i) => i.kind === "tool" && i.id === event.tool_call_id);
@@ -198,10 +198,10 @@ function renderTranscript(agentId) {
 function renderItem(agentId, item) {
   if (item.kind === "message") {
     const node = document.createElement("div");
-    node.className = `bubble ${item.role}` + (item.preamble ? " preamble" : "");
+    node.className = `bubble ${item.role}` + (item.system ? " system" : "");
     const role = document.createElement("span");
     role.className = "role";
-    role.textContent = item.preamble ? "preamble" : item.role;
+    role.textContent = item.system ? "system" : item.role;
     node.appendChild(role);
     node.appendChild(document.createTextNode(item.text));
     return node;

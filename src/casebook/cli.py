@@ -1,8 +1,8 @@
 """Command-line entry point.
 
-Keeps the original casebook commands (init/new/list/show/hide/delete/preamble/
-refer) and adds `serve`, which launches the coordinator app. The CLI is a thin
-shell over cases.py and templates.py; the app is a thin shell over the engine.
+Keeps the original casebook commands (init/new/list/show/hide/delete/refer) and
+adds `serve`, which launches the coordinator app. The CLI is a thin shell over
+cases.py and templates.py; the app is a thin shell over the engine.
 """
 
 from __future__ import annotations
@@ -111,20 +111,6 @@ def cmd_hide(args) -> None:
             )
 
 
-def cmd_preamble(args) -> None:
-    casebook_path = cases.find_casebook_root()
-    case = cases.resolve_case(casebook_path, args.case_id)
-    preamble = templates.PREAMBLE_TEMPLATE.format(
-        casebook_dir=casebook_path, case_id=case.case_id
-    )
-    if args.save:
-        path = case.path.joinpath(".preamble")
-        path.write_text(preamble)
-        print(f"Saved preamble to {path}")
-    else:
-        print(preamble, end="")
-
-
 def _find_agents_md() -> Path:
     project_root = cases.find_project_root()
     for candidate in AGENTS_MD_CANDIDATES:
@@ -182,11 +168,6 @@ def build_parser() -> argparse.ArgumentParser:
     delete_parser.add_argument("-f", "--force", action="store_true",
                                help="Skip confirmation")
 
-    preamble_parser = subparsers.add_parser("preamble", help="Print/save a case preamble")
-    preamble_parser.add_argument("case_id", help="Full case name or hex ID prefix")
-    preamble_parser.add_argument("-s", "--save", action="store_true",
-                                 help="Save to .preamble in the case directory")
-
     refer_parser = subparsers.add_parser("refer", help="Print/insert a casebook reference")
     refer_parser.add_argument("-i", "--insert", action="store_true",
                               help="Append the reference to the project's AGENTS.md")
@@ -205,7 +186,6 @@ COMMANDS = {
     "show": cmd_show,
     "delete": cmd_delete,
     "hide": cmd_hide,
-    "preamble": cmd_preamble,
     "refer": cmd_refer,
     "serve": cmd_serve,
 }

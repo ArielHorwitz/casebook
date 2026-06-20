@@ -1,9 +1,9 @@
 """Static text templates owned by the tool.
 
-Kept apart from logic so the directive and preamble wording is easy to find and
-edit. The preamble is the text casebook injects into an agent session at start;
-the old CLI used to print it for the user to paste, and the app now hands it to
-the agent over the wire (see coordinator).
+Kept apart from logic so the directive wording is easy to find and edit. The
+casebook directive (`AGENTS_MD`) is both written to `docs/casebook/agents.md` for
+humans and inlined into each agent's bootstrap turn as its system instructions —
+see `system_instructions`.
 """
 
 ROOT_AGENTS_EXCERPT = """\
@@ -68,13 +68,20 @@ docs/casebook/
   Use `casebook list` to browse cases and `casebook show <id>` for details.
 """
 
-# Sent as the first turn of every agent session bound to a case. When several
-# agents share a case they each receive it, then coordinate through the
-# filesystem rather than through each other.
-PREAMBLE_TEMPLATE = """\
-Read the casebook directive at {casebook_dir}/agents.md and follow its conventions.
-You are working on case `{case_id}`.
-"""
+def system_instructions(case_id: str) -> str:
+    """An agent's bootstrap turn: the full directive plus its case assignment.
+
+    ACP has no separate system-prompt channel, so casebook sends this as the first
+    turn of each session bound to a case. The directive is inlined directly rather
+    than pointing the agent at a file to read — no extra round-trip, no preamble.
+    When several agents share a case they each receive it, then coordinate through
+    the filesystem rather than through each other.
+    """
+    return (
+        f"{AGENTS_MD}\n"
+        f"You are working on case `{case_id}` (under `docs/casebook/`). Read its "
+        f"files to load context.\n"
+    )
 
 CASE_TOML_TEMPLATE = """\
 title = {title}

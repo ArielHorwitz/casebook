@@ -1,10 +1,10 @@
 """CaseCoordinator: the casebook-specific brain over the generic engine.
 
 This is the per-app coordination layer from docs/architecture.md. It maps cases
-to their agents, injects the preamble when an agent is spawned, watches case
-directories so user/agent edits stay visible, and brokers the permission
-round-trip between an agent and the UI. The engine below it knows nothing about
-cases; this layer does.
+to their agents, injects the directive as system instructions when an agent is
+spawned, watches case directories so user/agent edits stay visible, and brokers
+the permission round-trip between an agent and the UI. The engine below it knows
+nothing about cases; this layer does.
 """
 
 from __future__ import annotations
@@ -106,11 +106,8 @@ class CaseCoordinator:
         }
         self._watch_case(case)
         self._emit({"type": "agent_added", **self._agents[agent_id]})
-        preamble = templates.PREAMBLE_TEMPLATE.format(
-            casebook_dir=self.casebook_root, case_id=case.case_id
-        )
         try:
-            await session.start(preamble)
+            await session.start(templates.system_instructions(case.case_id))
         except Exception as error:
             self.sessions.pop(agent_id)
             self._agents.pop(agent_id, None)

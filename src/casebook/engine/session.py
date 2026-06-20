@@ -45,8 +45,8 @@ class AgentSession:
     _acp_session_id: Optional[str] = field(default=None, init=False)
     _busy: bool = field(default=False, init=False)
 
-    async def start(self, preamble: str) -> None:
-        """Spawn the agent, open a session, and inject the preamble as turn one."""
+    async def start(self, system_instructions: str) -> None:
+        """Spawn the agent, open a session, and inject system instructions as turn one."""
         client = AgentClient(
             self.agent_id,
             self.case_id,
@@ -75,9 +75,9 @@ class AgentSession:
         )
         session = await conn.new_session(cwd=str(self.project_root), mcp_servers=[])
         self._acp_session_id = session.session_id
-        await self.send(preamble, preamble=True)
+        await self.send(system_instructions, system=True)
 
-    async def send(self, text: str, *, preamble: bool = False) -> None:
+    async def send(self, text: str, *, system: bool = False) -> None:
         """Run one prompt turn. Rejected (with a notice) while a turn is active."""
         if self._busy:
             self._notify("agent is still responding; wait for the current turn")
@@ -90,7 +90,7 @@ class AgentSession:
                 "type": "message",
                 "role": "user",
                 "text": text,
-                "preamble": preamble,
+                "system": system,
             }
         )
         self._set_state("working")

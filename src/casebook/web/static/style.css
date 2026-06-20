@@ -117,7 +117,7 @@ body {
 .bubble.user { background: var(--user); align-self: flex-end; max-width: 90%; }
 .bubble.agent { background: var(--agent); }
 .bubble.thought { background: var(--thought); color: var(--muted); font-style: italic; font-size: 13px; }
-.bubble.preamble { opacity: 0.6; font-size: 12px; }
+.bubble.system { opacity: 0.6; font-size: 12px; }
 .bubble .role { font-size: 10px; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 2px; }
 
 .tool {

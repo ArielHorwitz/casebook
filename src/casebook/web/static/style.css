@@ -48,7 +48,26 @@ body {
   overflow-y: auto;
   padding: 8px;
 }
-#sidebar h2 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 8px; }
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; margin: 8px; }
+.sidebar-head h2 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 0; }
+#new-case {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#new-case:hover { border-color: var(--accent); }
+#backend-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 4px;
+}
 #case-list { list-style: none; margin: 0; padding: 0; }
 #case-list li {
   padding: 8px 10px;

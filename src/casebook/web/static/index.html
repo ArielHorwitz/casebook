@@ -14,13 +14,17 @@
     </header>
     <div id="layout">
       <aside id="sidebar">
-        <h2>Cases</h2>
+        <div class="sidebar-head">
+          <h2>Cases</h2>
+          <button id="new-case" title="new case">+ case</button>
+        </div>
         <ul id="case-list"></ul>
       </aside>
       <main id="workspace">
         <section id="agents">
           <div id="session-bar">
             <h3>Sessions</h3>
+            <select id="backend-select" title="backend for new sessions" hidden></select>
             <button id="add-agent" hidden>+ session</button>
           </div>
           <div id="agent-panes"></div>

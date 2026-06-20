@@ -54,12 +54,14 @@ casebook serve                # launch the coordinator app (browser UI)
 
 ## App
 
-The app opens on your cases. Pick one, add one or more agents to it, and
-converse. Each agent is its own ACP session, bootstrapped into the case with the
-casebook directive inlined as its system instructions — no copy-paste. Agents
-working the same case coordinate through the filesystem, not through each other.
-Edit files in your own editor; the app watches the case directory and the agents
-read fresh on their next turn.
+The app opens on your cases. Create a case (+ case), pick one, and start one or
+more sessions on it (+ session) — choosing the backend and, once running, the
+model. Each session is its own ACP session, bootstrapped into the case with the
+casebook directive inlined as its system instructions — no copy-paste. Sessions
+are persisted and resumable: close one to stop it but keep its history, resume it
+later, or delete it. Sessions working the same case coordinate through the
+filesystem, not through each other. Edit files in your own editor; the app
+watches the case directory and the agents read fresh on their next turn.
 
 See `docs/casebook/` decision notes for the design choices behind the
 implementation.

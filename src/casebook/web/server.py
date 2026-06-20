@@ -47,8 +47,15 @@ def create_app(project_root: Path) -> Starlette:
     async def index(_request: Request) -> FileResponse:
         return FileResponse(STATIC_DIR.joinpath("index.html"))
 
-    async def list_cases(_request: Request) -> JSONResponse:
+    async def cases_endpoint(request: Request) -> JSONResponse:
+        if request.method == "POST":
+            body = await request.json()
+            summary = engine().create_case(body.get("title", "Unnamed case"))
+            return JSONResponse(summary, status_code=201)
         return JSONResponse(engine().list_cases())
+
+    async def list_backends(_request: Request) -> JSONResponse:
+        return JSONResponse(engine().list_backends())
 
     async def case_detail(request: Request) -> JSONResponse:
         try:
@@ -73,7 +80,8 @@ def create_app(project_root: Path) -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/", index),
-            Route("/api/cases", list_cases),
+            Route("/api/cases", cases_endpoint, methods=["GET", "POST"]),
+            Route("/api/backends", list_backends),
             Route("/api/cases/{case_id}", case_detail),
             Route("/api/cases/{case_id}/files/{filename}", case_file),
             WebSocketRoute("/ws", websocket_endpoint),

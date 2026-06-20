@@ -125,6 +125,19 @@ class CaseCoordinator:
     def list_cases(self) -> list[dict]:
         return [self._case_summary(case) for case in cases.list_cases(self.casebook_root)]
 
+    def list_backends(self) -> dict:
+        return {
+            "backends": sorted(self.config.backends),
+            "default": self.config.default_backend,
+        }
+
+    def create_case(self, title: str) -> dict:
+        """Create a case on disk and announce it so open browsers refresh."""
+        case = cases.create_case(self.casebook_root, title or "Unnamed case")
+        summary = self._case_summary(case)
+        self._emit({"type": "case_created", **summary})
+        return summary
+
     def case_detail(self, case_id: str) -> dict:
         case = cases.resolve_case(self.casebook_root, case_id)
         detail = self._case_summary(case)

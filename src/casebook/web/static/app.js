@@ -56,6 +56,8 @@ function handleEvent(event) {
     case "models":
       state.models.set(event.agent_id, { available: event.available || [], current: event.current });
       return renderModel(event.agent_id);
+    case "case_created":
+      return loadCases();
     case "files_changed":
       if (event.case_id === state.activeCase) renderFiles(event.files);
       return;
@@ -380,9 +382,36 @@ async function openFile(name) {
   el("file-modal").hidden = false;
 }
 
+// --- backends -------------------------------------------------------------
+async function loadBackends() {
+  const info = await fetch("/api/backends").then((r) => r.json());
+  const select = el("backend-select");
+  select.replaceChildren(...info.backends.map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    return option;
+  }));
+  if (info.default) select.value = info.default;
+  select.hidden = info.backends.length <= 1;
+}
+
 // --- wiring ---------------------------------------------------------------
 el("add-agent").onclick = () => {
-  if (state.activeCase) send({ action: "add_agent", case_id: state.activeCase });
+  if (state.activeCase) {
+    send({ action: "add_agent", case_id: state.activeCase, backend: el("backend-select").value });
+  }
+};
+el("new-case").onclick = async () => {
+  const title = prompt("New case title:", "Unnamed case");
+  if (title === null) return;
+  const summary = await fetch("/api/cases", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: title.trim() || "Unnamed case" }),
+  }).then((r) => r.json());
+  await loadCases();
+  openCase(summary.case_id);
 };
 el("file-modal-close").onclick = () => (el("file-modal").hidden = true);
 el("file-modal").onclick = (e) => {
@@ -390,4 +419,5 @@ el("file-modal").onclick = (e) => {
 };
 
 loadCases();
+loadBackends();
 connect();

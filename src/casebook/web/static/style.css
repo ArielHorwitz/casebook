@@ -120,6 +120,39 @@ body {
 .bubble.system { opacity: 0.6; font-size: 12px; }
 .bubble .role { font-size: 10px; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 2px; }
 
+/* User text keeps source whitespace; rendered markdown flows normally. */
+.bubble .content { white-space: normal; }
+.bubble.user .content { white-space: pre-wrap; }
+.bubble .content > :first-child { margin-top: 0; }
+.bubble .content > :last-child { margin-bottom: 0; }
+.bubble .content p { margin: 6px 0; }
+.bubble .content ul, .bubble .content ol { margin: 6px 0; padding-left: 20px; }
+.bubble .content h1, .bubble .content h2, .bubble .content h3,
+.bubble .content h4 { margin: 10px 0 6px; font-size: 14px; }
+.bubble .content a { color: var(--accent); }
+.bubble .content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.bubble .content pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.bubble .content pre code { background: none; padding: 0; }
+.bubble .content blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--muted);
+  color: var(--muted);
+}
+.bubble .content table { border-collapse: collapse; margin: 6px 0; }
+.bubble .content th, .bubble .content td { border: 1px solid var(--muted); padding: 3px 6px; }
+
 .tool {
   background: var(--tool);
   border-left: 3px solid var(--accent);

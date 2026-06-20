@@ -11,6 +11,13 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 
+// Render model output as markdown, sanitized — the agent's text is semi-trusted
+// (it may quote files or web content), so we never inject raw HTML.
+marked.setOptions({ gfm: true, breaks: true });
+function renderMarkdown(text) {
+  return DOMPurify.sanitize(marked.parse(text || ""));
+}
+
 // --- websocket ------------------------------------------------------------
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -203,7 +210,15 @@ function renderItem(agentId, item) {
     role.className = "role";
     role.textContent = item.system ? "system" : item.role;
     node.appendChild(role);
-    node.appendChild(document.createTextNode(item.text));
+    const body = document.createElement("div");
+    body.className = "content";
+    // User text is shown verbatim; everything the model emits is markdown.
+    if (item.role === "user") {
+      body.textContent = item.text;
+    } else {
+      body.innerHTML = renderMarkdown(item.text);
+    }
+    node.appendChild(body);
     return node;
   }
   if (item.kind === "tool") {

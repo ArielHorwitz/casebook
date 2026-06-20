@@ -28,6 +28,7 @@ class CaseCoordinator:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
         self.casebook_root = self.project_root.joinpath(cases.CASEBOOK_DIR)
+        self.config = config.load_config(self.project_root)
         self.bus = EventBus()
         self.sessions = SessionManager()
         self._agents: dict[str, dict] = {}
@@ -82,7 +83,7 @@ class CaseCoordinator:
         backend_name: Optional[str] = None,
     ) -> str:
         case = cases.resolve_case(self.casebook_root, case_id)
-        backend = config.select_backend(self.project_root, backend_name)
+        backend = self.config.select_backend(backend_name)
         existing = len(self.sessions.for_case(case.case_id))
         agent_id = self.sessions.new_agent_id()
         label = label or f"Agent {existing + 1}"

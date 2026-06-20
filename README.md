@@ -13,8 +13,24 @@ competing store of state. See `docs/vision.md` for intent and
 
 ```bash
 uv pip install -e .
-# the Claude backend uses Zed's adapter, resolved from PATH or npx:
-npm install -g @zed-industries/claude-code-acp   # optional; npx is used otherwise
+# Backends are installed explicitly. The Claude backend uses Zed's adapter and
+# is picked up automatically once its binary is on PATH:
+npm install -g @zed-industries/claude-code-acp   # optional
+```
+
+Casebook ships a built-in `echo` backend (an in-tree ACP agent that reflects
+messages back), so the app always runs even with no model installed. Configure
+additional backends in `~/.config/casebook/config.toml` (respecting
+`$XDG_CONFIG_HOME`), optionally overridden per-project in `.casebook/config.toml`:
+
+```toml
+default = "claude"
+
+[backends.claude]
+command = ["claude-code-acp"]
+
+[backends.gemini]
+command = ["gemini", "--experimental-acp"]
 ```
 
 ## CLI

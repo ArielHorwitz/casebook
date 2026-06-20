@@ -3,6 +3,11 @@
 Triage and prioritization of user feedback from the initial implementation
 (commit `567aedbe27e0`).
 
+> **Status: all items implemented** (branch `feat/casebook`, atomic commits). See
+> [post-feedback-implementation-summary.md](post-feedback-implementation-summary.md)
+> for what shipped and the design decisions. The triage below is retained as the
+> original analysis.
+
 ## Feedback items
 
 Each item is categorized by area and assigned a priority tier.

@@ -8,7 +8,6 @@ shell over cases.py and templates.py; the app is a thin shell over the engine.
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -43,20 +42,10 @@ def cmd_init(args) -> None:
 
 def cmd_new(args) -> None:
     casebook_path = cases.find_casebook_root()
-    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR", "vi")
-    tmpfile = casebook_path.joinpath(f".casebook-intro-{cases.new_case_id()}.md")
-    tmpfile.write_text("")
-    try:
-        result = subprocess.run([editor, str(tmpfile)])
-        if result.returncode != 0:
-            print("error: editor exited with non-zero status", file=sys.stderr)
-            raise SystemExit(1)
-        intro = tmpfile.read_text()
-    finally:
-        tmpfile.unlink(missing_ok=True)
-    case = cases.create_case(casebook_path, args.title or "Unnamed case", intro)
+    case = cases.create_case(casebook_path, args.title or "Unnamed case")
     print(f"Created case {case.case_id}: {case.title}")
     print(f"  {case.path}")
+    print("  Add an overview.md (and any intro/design docs) to describe the case.")
 
 
 def cmd_list(args) -> None:

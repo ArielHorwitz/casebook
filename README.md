@@ -37,7 +37,7 @@ command = ["gemini", "--experimental-acp"]
 
 ```bash
 casebook init                 # initialize docs/casebook/ in a project
-casebook new -t "Title"       # create a case (opens $EDITOR for the intro)
+casebook new -t "Title"       # create a case
 casebook list                 # list cases
 casebook show <id>            # show a case
 casebook serve                # launch the coordinator app (browser UI)

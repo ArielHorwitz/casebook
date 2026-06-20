@@ -139,8 +139,12 @@ def resolve_case(casebook_path: Path, case_id: str) -> Case:
     return load_case(matches[0])
 
 
-def create_case(casebook_path: Path, title: str, intro: str = "") -> Case:
-    """Create a new case directory with metadata and an optional intro."""
+def create_case(casebook_path: Path, title: str) -> Case:
+    """Create a new case directory with metadata.
+
+    No content files are written: the user is encouraged to add an overview (and
+    any intro/design docs) themselves, but nothing is required up front.
+    """
     case_id = new_case_id()
     case_path = casebook_path.joinpath(case_id)
     case_path.mkdir(parents=True)
@@ -150,6 +154,4 @@ def create_case(casebook_path: Path, title: str, intro: str = "") -> Case:
             created=format_toml_value(datetime.datetime.now().isoformat()),
         )
     )
-    if intro.strip():
-        case_path.joinpath("intro.md").write_text(intro)
     return load_case(case_path)

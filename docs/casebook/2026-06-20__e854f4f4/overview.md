@@ -141,6 +141,21 @@ a round-trip (the agent reads the file on its first turn).
 
 Not blocking day-to-day use; address when convenient.
 
+#### 10. Model selection per session (added after initial triage)
+
+> i want to be able to select models as well, particularly i prefer to work
+> with opus 4.8 over opus 4.6.
+
+ACP already supports this: `new_session` returns the backend's advertised model
+list (`SessionModelState` with `available_models` + `current_model_id`), and
+`set_session_model(model_id, session_id)` switches it.
+
+**Scope:**
+- Surface the advertised model list in the UI and let the user pick one per
+  session (calls `set_session_model`).
+- Allow a configured default model preference in `config.toml`, applied at
+  session start when the backend advertises a matching model.
+
 #### 9. Explicit backend installation (no auto-npx)
 
 > i don't like the idea of auto-fetching-and-running npx for the backend.

@@ -10,7 +10,6 @@ docs/casebook/
   agents.md          # this file
   YYYY-MM-DD__hex/   # case directory
     case.toml        # case metadata
-    intro.md         # the user's original writeup (do not modify)
     overview.md      # evolving summary of the case (keep updated)
     ...              # any other files: reports, designs, ADRs, transcripts, etc.
 ```
@@ -39,10 +38,10 @@ docs/casebook/
   `websocket-reconnection-backoff-strategy.md` or
   `user-dashboard-layout-accessibility-review.md` over vague names like
   `report.md` or `notes.md`.
-- Cases typically include an `intro.md` with the user's original writeup. This
-  should not be modified — it is the original context, kept for posterity.
-- Cases typically include an `overview.md` as a living summary of the case.
-  Update this as the case evolves to keep it useful for future sessions.
+- A case typically grows an `overview.md` as a living summary. Create and update
+  it as the case evolves to keep it useful for future sessions.
+- Some cases include an `intro.md` with the user's original writeup. When
+  present it is the original context, kept for posterity — do not modify it.
 - The casebook includes past cases that may provide historical context for
   design decisions, prior investigations, or previously considered approaches.
   Use `casebook list` to browse cases and `casebook show <id>` for details.

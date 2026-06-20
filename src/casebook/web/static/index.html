@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Casebook</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <span class="brand">casebook</span>
+      <span id="case-title"></span>
+      <span id="connection" class="disconnected">connecting…</span>
+    </header>
+    <div id="layout">
+      <aside id="sidebar">
+        <h2>Cases</h2>
+        <ul id="case-list"></ul>
+      </aside>
+      <main id="workspace">
+        <section id="case-meta" hidden>
+          <div id="case-files">
+            <h3>Files</h3>
+            <ul id="file-list"></ul>
+          </div>
+        </section>
+        <section id="agents">
+          <div id="agent-panes"></div>
+          <button id="add-agent" hidden>+ agent</button>
+        </section>
+        <p id="placeholder">Select a case to begin.</p>
+      </main>
+    </div>
+
+    <div id="file-modal" hidden>
+      <div class="modal-body">
+        <header><span id="file-modal-name"></span><button id="file-modal-close">×</button></header>
+        <pre id="file-modal-content"></pre>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

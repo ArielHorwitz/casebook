@@ -48,7 +48,8 @@ function handleEvent(event) {
     case "snapshot":
       return applySnapshot(event);
     case "agent_added":
-      return addAgent(event);
+    case "agent_updated":
+      return upsertAgent(event);
     case "agent_removed":
       return removeAgent(event.agent_id);
     case "files_changed":
@@ -64,13 +65,14 @@ function applySnapshot(snapshot) {
   state.transcripts.clear();
   for (const [agentId, pane] of state.panes) pane.root.remove();
   state.panes.clear();
-  for (const agent of snapshot.agents) addAgent(agent);
+  for (const agent of snapshot.agents) upsertAgent(agent);
   for (const [agentId, events] of Object.entries(snapshot.transcripts || {})) {
     for (const event of events) applyToTranscript(event);
   }
 }
 
-function addAgent(agent) {
+// Handles both agent_added and agent_updated (e.g. live <-> stored transitions).
+function upsertAgent(agent) {
   state.agents.set(agent.agent_id, agent);
   if (!state.transcripts.has(agent.agent_id)) state.transcripts.set(agent.agent_id, []);
   buildPane(agent);
@@ -138,11 +140,13 @@ function buildPane(agent) {
     <div class="agent-head">
       <span class="label"></span>
       <span class="state"></span>
-      <button class="remove" title="remove agent">×</button>
+      <button class="resume" hidden>Resume</button>
+      <button class="close" title="close session (keep history)">×</button>
+      <button class="delete" title="delete session and history">🗑</button>
     </div>
     <div class="transcript"></div>
     <div class="composer">
-      <textarea rows="1" placeholder="Message this agent…"></textarea>
+      <textarea rows="1" placeholder="Message this session…"></textarea>
       <button class="send">Send</button>
       <button class="cancel" hidden>Stop</button>
     </div>`;
@@ -165,7 +169,13 @@ function buildPane(agent) {
     }
   };
   cancelBtn.onclick = () => send({ action: "cancel", agent_id: agent.agent_id });
-  root.querySelector(".remove").onclick = () => send({ action: "remove_agent", agent_id: agent.agent_id });
+  root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
+  root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
+  root.querySelector(".delete").onclick = () => {
+    if (confirm("Delete this session and its history?")) {
+      send({ action: "delete_agent", agent_id: agent.agent_id });
+    }
+  };
 
   const pane = {
     root,
@@ -173,6 +183,8 @@ function buildPane(agent) {
     input,
     sendBtn,
     cancelBtn,
+    composer: root.querySelector(".composer"),
+    resumeBtn: root.querySelector(".resume"),
     stateEl: root.querySelector(".state"),
     labelEl: root.querySelector(".label"),
   };
@@ -186,9 +198,13 @@ function updateHead(agentId) {
   const agent = state.agents.get(agentId);
   if (!pane || !agent) return;
   pane.labelEl.textContent = `${agent.label}  ·  ${agent.backend || ""}`;
+  const live = !!agent.live;
   const working = agent.state === "working" || agent.state === "starting";
   pane.stateEl.textContent = agent.state || "";
   pane.stateEl.className = "state" + (working ? " working" : "");
+  // A stored (non-live) session shows a Resume button instead of a composer.
+  pane.resumeBtn.hidden = live;
+  pane.composer.hidden = !live;
   pane.input.disabled = working;
   pane.sendBtn.disabled = working;
   pane.cancelBtn.hidden = agent.state !== "working";

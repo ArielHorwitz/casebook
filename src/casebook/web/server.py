@@ -33,11 +33,13 @@ def create_app(project_root: Path) -> Starlette:
 
     @asynccontextmanager
     async def lifespan(_app: Starlette):
-        coordinator["instance"] = CaseCoordinator(project_root)
+        instance = CaseCoordinator(project_root)
+        instance.load_persisted()
+        coordinator["instance"] = instance
         try:
             yield
         finally:
-            await coordinator["instance"].shutdown()
+            await instance.shutdown()
 
     def engine() -> CaseCoordinator:
         return coordinator["instance"]
@@ -106,12 +108,16 @@ def _dispatch(engine: CaseCoordinator, action: dict) -> None:
     if name == "add_agent":
         _spawn(engine.add_agent(action["case_id"], action.get("label"),
                                 action.get("backend")))
+    elif name == "resume_agent":
+        _spawn(engine.resume_agent(action["agent_id"]))
     elif name == "send":
         _spawn(engine.send(action["agent_id"], action["text"]))
     elif name == "cancel":
         _spawn(engine.cancel(action["agent_id"]))
-    elif name == "remove_agent":
-        _spawn(engine.remove_agent(action["agent_id"]))
+    elif name == "close_agent":
+        _spawn(engine.close_agent(action["agent_id"]))
+    elif name == "delete_agent":
+        _spawn(engine.delete_agent(action["agent_id"]))
     elif name == "permission":
         engine.resolve_permission(action["request_id"], action.get("option_id"))
 

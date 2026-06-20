@@ -18,16 +18,17 @@
         <ul id="case-list"></ul>
       </aside>
       <main id="workspace">
-        <section id="case-meta" hidden>
-          <div id="case-files">
-            <h3>Files</h3>
-            <ul id="file-list"></ul>
-          </div>
-        </section>
         <section id="agents">
+          <div id="session-bar">
+            <h3>Sessions</h3>
+            <button id="add-agent" hidden>+ session</button>
+          </div>
           <div id="agent-panes"></div>
-          <button id="add-agent" hidden>+ agent</button>
         </section>
+        <details id="case-meta" hidden>
+          <summary>Files</summary>
+          <ul id="file-list"></ul>
+        </details>
         <p id="placeholder">Select a case to begin.</p>
       </main>
     </div>

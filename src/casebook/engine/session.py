@@ -44,14 +44,26 @@ class AgentSession:
     _conn: Any = field(default=None, init=False)
     _acp_session_id: Optional[str] = field(default=None, init=False)
     _busy: bool = field(default=False, init=False)
+    _supports_load: bool = field(default=False, init=False)
+    _suppress_emit: bool = field(default=False, init=False)
 
-    async def start(self, system_instructions: str) -> None:
-        """Spawn the agent, open a session, and inject system instructions as turn one."""
+    @property
+    def acp_session_id(self) -> Optional[str]:
+        return self._acp_session_id
+
+    def _guarded_emit(self, event: dict) -> None:
+        # Dropped while replaying a loaded session — that history is already on
+        # disk, so re-emitting it would duplicate the transcript.
+        if not self._suppress_emit:
+            self.emit(event)
+
+    async def _spawn(self) -> None:
+        """Spawn the subprocess, initialize the connection, note its capabilities."""
         client = AgentClient(
             self.agent_id,
             self.case_id,
             self.project_root,
-            self.emit,
+            self._guarded_emit,
             self.request_permission,
         )
         # The backend is the user's own trusted agent; pass the full environment
@@ -68,14 +80,58 @@ class AgentSession:
             )
         )
         self._conn = conn
-        await conn.initialize(
+        initialized = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=CLIENT_CAPABILITIES,
             client_info=Implementation(name="casebook", version="0.1.0"),
         )
-        session = await conn.new_session(cwd=str(self.project_root), mcp_servers=[])
+        capabilities = getattr(initialized, "agent_capabilities", None)
+        self._supports_load = bool(getattr(capabilities, "load_session", False))
+
+    async def start(self, system_instructions: str) -> None:
+        """Spawn the agent, open a fresh session, and inject system instructions."""
+        await self._spawn()
+        session = await self._conn.new_session(
+            cwd=str(self.project_root), mcp_servers=[]
+        )
         self._acp_session_id = session.session_id
         await self.send(system_instructions, system=True)
+
+    async def resume(
+        self, system_instructions: str, acp_session_id: Optional[str]
+    ) -> None:
+        """Bring a stored session back to life.
+
+        When the backend supports `session/load` and we have its ACP session id,
+        the agent rehydrates its own history (the replayed updates are suppressed,
+        since we already hold that transcript). Otherwise we open a fresh session —
+        the visible history is preserved but the agent does not remember it — and
+        say so.
+        """
+        await self._spawn()
+        if self._supports_load and acp_session_id:
+            self._acp_session_id = acp_session_id
+            self._suppress_emit = True
+            try:
+                await self._conn.load_session(
+                    cwd=str(self.project_root),
+                    session_id=acp_session_id,
+                    mcp_servers=[],
+                )
+            finally:
+                self._suppress_emit = False
+            self._set_state("idle")
+        else:
+            session = await self._conn.new_session(
+                cwd=str(self.project_root), mcp_servers=[]
+            )
+            self._acp_session_id = session.session_id
+            self._notify(
+                "previous agent context could not be restored (backend does not "
+                "support session loading); the visible history is preserved but "
+                "the agent does not remember it"
+            )
+            await self.send(system_instructions, system=True)
 
     async def send(self, text: str, *, system: bool = False) -> None:
         """Run one prompt turn. Rejected (with a notice) while a turn is active."""

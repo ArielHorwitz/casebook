@@ -10,18 +10,24 @@ nothing about cases; this layer does.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from watchfiles import awatch
 
-from . import cases, config, templates
+from . import cases, config, storage, templates
 from .engine.events import EventBus
 from .engine.session import AgentSession, SessionManager
 
-# Event types worth replaying to a browser that connects/reloads mid-case.
+# Event types worth replaying to a browser that connects/reloads mid-case, and
+# worth persisting so a session survives a restart.
 _REPLAYABLE = {"message", "tool_call", "notice", "plan"}
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now().isoformat()
 
 
 class CaseCoordinator:
@@ -29,21 +35,56 @@ class CaseCoordinator:
         self.project_root = project_root.resolve()
         self.casebook_root = self.project_root.joinpath(cases.CASEBOOK_DIR)
         self.config = config.load_config(self.project_root)
+        self.store = storage.SessionStore(self.project_root)
         self.bus = EventBus()
         self.sessions = SessionManager()
         self._agents: dict[str, dict] = {}
         self._transcripts: dict[str, list[dict]] = {}
+        self._acp_ids: dict[str, Optional[str]] = {}
+        self._created: dict[str, Optional[str]] = {}
         self._permissions: dict[str, asyncio.Future] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
-    # --- single emit choke point: record, then publish -------------------
+    def load_persisted(self) -> None:
+        """Restore every session on disk as a (non-live) stored session."""
+        for stored in self.store.load_all():
+            meta = stored.meta
+            agent_id = meta["agent_id"]
+            self._agents[agent_id] = {
+                "agent_id": agent_id,
+                "case_id": meta["case_id"],
+                "label": meta.get("label", agent_id),
+                "backend": meta.get("backend", ""),
+                "state": "stored",
+                "live": False,
+            }
+            self._acp_ids[agent_id] = meta.get("acp_session_id")
+            self._created[agent_id] = meta.get("created")
+            self._transcripts[agent_id] = list(stored.transcript)
+
+    # --- single emit choke point: record, persist, then publish ----------
     def _emit(self, event: dict) -> None:
         agent_id = event.get("agent_id")
         if event.get("type") == "agent_state" and agent_id in self._agents:
             self._agents[agent_id]["state"] = event.get("state")
-        if agent_id and event.get("type") in _REPLAYABLE:
+        if agent_id in self._agents and event.get("type") in _REPLAYABLE:
             self._transcripts.setdefault(agent_id, []).append(event)
+            self.store.append_event(self._agents[agent_id]["case_id"], agent_id, event)
         self.bus.publish(event)
+
+    def _persist_meta(self, agent_id: str) -> None:
+        agent = self._agents[agent_id]
+        self.store.write_meta(
+            {
+                "agent_id": agent_id,
+                "case_id": agent["case_id"],
+                "label": agent["label"],
+                "backend": agent["backend"],
+                "acp_session_id": self._acp_ids.get(agent_id),
+                "created": self._created.get(agent_id),
+                "last_active": _now_iso(),
+            }
+        )
 
     # --- cases (read-only views for the UI) ------------------------------
     def list_cases(self) -> list[dict]:
@@ -54,7 +95,7 @@ class CaseCoordinator:
         detail = self._case_summary(case)
         detail["files"] = case.files()
         detail["agents"] = [
-            self._agents[s.agent_id] for s in self.sessions.for_case(case.case_id)
+            agent for agent in self._agents.values() if agent["case_id"] == case.case_id
         ]
         return detail
 
@@ -84,9 +125,9 @@ class CaseCoordinator:
     ) -> str:
         case = cases.resolve_case(self.casebook_root, case_id)
         backend = self.config.select_backend(backend_name)
-        existing = len(self.sessions.for_case(case.case_id))
+        existing = sum(1 for a in self._agents.values() if a["case_id"] == case.case_id)
         agent_id = self.sessions.new_agent_id()
-        label = label or f"Agent {existing + 1}"
+        label = label or f"Session {existing + 1}"
         session = AgentSession(
             agent_id=agent_id,
             label=label,
@@ -97,32 +138,87 @@ class CaseCoordinator:
             request_permission=self._request_permission,
         )
         self.sessions.add(session)
+        self._created[agent_id] = _now_iso()
+        self._acp_ids[agent_id] = None
         self._agents[agent_id] = {
             "agent_id": agent_id,
             "case_id": case.case_id,
             "label": label,
             "backend": backend.name,
             "state": "starting",
+            "live": True,
         }
         self._watch_case(case)
+        self._persist_meta(agent_id)
         self._emit({"type": "agent_added", **self._agents[agent_id]})
         try:
             await session.start(templates.system_instructions(case.case_id))
         except Exception as error:
             self.sessions.pop(agent_id)
             self._agents.pop(agent_id, None)
+            self._acp_ids.pop(agent_id, None)
+            self._created.pop(agent_id, None)
+            self.store.delete(case.case_id, agent_id)
             self._emit({"type": "agent_removed", "agent_id": agent_id,
                         "case_id": case.case_id})
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": case.case_id,
                         "message": f"failed to start agent: {error}"})
             raise
+        self._acp_ids[agent_id] = session.acp_session_id
+        self._persist_meta(agent_id)
         return agent_id
+
+    async def resume_agent(self, agent_id: str) -> None:
+        """Bring a stored session back to life (idempotent if already live)."""
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise cases.CasebookError(f"no such session: {agent_id}")
+        if agent.get("live"):
+            return
+        case = cases.resolve_case(self.casebook_root, agent["case_id"])
+        try:
+            backend = self.config.select_backend(agent["backend"] or None)
+        except KeyError as error:
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"cannot resume session: {error}"})
+            raise
+        session = AgentSession(
+            agent_id=agent_id,
+            label=agent["label"],
+            case_id=agent["case_id"],
+            project_root=self.project_root,
+            backend=backend,
+            emit=self._emit,
+            request_permission=self._request_permission,
+        )
+        self.sessions.add(session)
+        agent["state"] = "starting"
+        agent["live"] = True
+        self._watch_case(case)
+        self._emit({"type": "agent_updated", **agent})
+        try:
+            await session.resume(
+                templates.system_instructions(agent["case_id"]),
+                self._acp_ids.get(agent_id),
+            )
+        except Exception as error:
+            self.sessions.pop(agent_id)
+            agent["state"] = "stored"
+            agent["live"] = False
+            self._emit({"type": "agent_updated", **agent})
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"failed to resume session: {error}"})
+            raise
+        self._acp_ids[agent_id] = session.acp_session_id
+        self._persist_meta(agent_id)
 
     async def send(self, agent_id: str, text: str) -> None:
         session = self.sessions.get(agent_id)
         if session is None:
-            raise cases.CasebookError(f"no such agent: {agent_id}")
+            raise cases.CasebookError(f"no such live session: {agent_id}")
         await session.send(text)
 
     async def cancel(self, agent_id: str) -> None:
@@ -130,15 +226,31 @@ class CaseCoordinator:
         if session is not None:
             await session.cancel()
 
-    async def remove_agent(self, agent_id: str) -> None:
+    async def close_agent(self, agent_id: str) -> None:
+        """Stop the subprocess but keep the session on disk so it can be resumed."""
         session = self.sessions.pop(agent_id)
-        meta = self._agents.pop(agent_id, None)
-        self._transcripts.pop(agent_id, None)
+        agent = self._agents.get(agent_id)
         if session is not None:
             await session.stop()
-        if meta is not None:
+        if agent is not None:
+            agent["state"] = "stored"
+            agent["live"] = False
+            self._persist_meta(agent_id)
+            self._emit({"type": "agent_updated", **agent})
+
+    async def delete_agent(self, agent_id: str) -> None:
+        """Stop (if live) and erase the session and its stored history."""
+        session = self.sessions.pop(agent_id)
+        agent = self._agents.pop(agent_id, None)
+        self._transcripts.pop(agent_id, None)
+        self._acp_ids.pop(agent_id, None)
+        self._created.pop(agent_id, None)
+        if session is not None:
+            await session.stop()
+        if agent is not None:
+            self.store.delete(agent["case_id"], agent_id)
             self._emit({"type": "agent_removed", "agent_id": agent_id,
-                        "case_id": meta["case_id"]})
+                        "case_id": agent["case_id"]})
 
     # --- permission round-trip (agent waits on the user) -----------------
     async def _request_permission(self, payload: dict) -> Optional[str]:

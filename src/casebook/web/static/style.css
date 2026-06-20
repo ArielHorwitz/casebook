@@ -111,6 +111,14 @@ body {
 .agent-head .label { font-weight: 600; }
 .agent-head .state { font-size: 11px; color: var(--muted); margin-left: auto; }
 .agent-head .state.working { color: var(--accent); }
+.agent-head .allow {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
 .agent-head .resume {
   background: var(--accent);
   color: #11131a;

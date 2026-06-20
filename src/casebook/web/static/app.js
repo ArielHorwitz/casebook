@@ -140,6 +140,7 @@ function buildPane(agent) {
     <div class="agent-head">
       <span class="label"></span>
       <span class="state"></span>
+      <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
       <button class="resume" hidden>Resume</button>
       <button class="close" title="close session (keep history)">×</button>
       <button class="delete" title="delete session and history">🗑</button>
@@ -169,6 +170,8 @@ function buildPane(agent) {
     }
   };
   cancelBtn.onclick = () => send({ action: "cancel", agent_id: agent.agent_id });
+  const allowInput = root.querySelector(".allow input");
+  allowInput.onchange = () => send({ action: "set_always_allow", agent_id: agent.agent_id, value: allowInput.checked });
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => {
@@ -185,6 +188,7 @@ function buildPane(agent) {
     cancelBtn,
     composer: root.querySelector(".composer"),
     resumeBtn: root.querySelector(".resume"),
+    allowInput,
     stateEl: root.querySelector(".state"),
     labelEl: root.querySelector(".label"),
   };
@@ -205,6 +209,7 @@ function updateHead(agentId) {
   // A stored (non-live) session shows a Resume button instead of a composer.
   pane.resumeBtn.hidden = live;
   pane.composer.hidden = !live;
+  pane.allowInput.checked = !!agent.always_allow;
   pane.input.disabled = working;
   pane.sendBtn.disabled = working;
   pane.cancelBtn.hidden = agent.state !== "working";

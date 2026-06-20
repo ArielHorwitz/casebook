@@ -120,6 +120,8 @@ def _dispatch(engine: CaseCoordinator, action: dict) -> None:
         _spawn(engine.delete_agent(action["agent_id"]))
     elif name == "permission":
         engine.resolve_permission(action["request_id"], action.get("option_id"))
+    elif name == "set_always_allow":
+        engine.set_always_allow(action["agent_id"], action.get("value", False))
 
 
 def _spawn(coro) -> None:

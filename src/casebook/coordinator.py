@@ -30,6 +30,15 @@ def _now_iso() -> str:
     return datetime.datetime.now().isoformat()
 
 
+def _auto_allow_option(options: list[dict]) -> Optional[str]:
+    """Pick the option to grant when a session is in always-allow mode."""
+    for kind in ("allow_always", "allow_once"):
+        for option in options:
+            if option.get("kind") == kind:
+                return option["option_id"]
+    return options[0]["option_id"] if options else None
+
+
 class CaseCoordinator:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
@@ -55,6 +64,7 @@ class CaseCoordinator:
                 "case_id": meta["case_id"],
                 "label": meta.get("label", agent_id),
                 "backend": meta.get("backend", ""),
+                "always_allow": bool(meta.get("always_allow", False)),
                 "state": "stored",
                 "live": False,
             }
@@ -80,6 +90,7 @@ class CaseCoordinator:
                 "case_id": agent["case_id"],
                 "label": agent["label"],
                 "backend": agent["backend"],
+                "always_allow": agent.get("always_allow", False),
                 "acp_session_id": self._acp_ids.get(agent_id),
                 "created": self._created.get(agent_id),
                 "last_active": _now_iso(),
@@ -145,6 +156,7 @@ class CaseCoordinator:
             "case_id": case.case_id,
             "label": label,
             "backend": backend.name,
+            "always_allow": False,
             "state": "starting",
             "live": True,
         }
@@ -252,8 +264,25 @@ class CaseCoordinator:
             self._emit({"type": "agent_removed", "agent_id": agent_id,
                         "case_id": agent["case_id"]})
 
+    def set_always_allow(self, agent_id: str, value: bool) -> None:
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            return
+        agent["always_allow"] = bool(value)
+        self._persist_meta(agent_id)
+        self._emit({"type": "agent_updated", **agent})
+
     # --- permission round-trip (agent waits on the user) -----------------
     async def _request_permission(self, payload: dict) -> Optional[str]:
+        agent_id = payload.get("agent_id")
+        if agent_id and self._agents.get(agent_id, {}).get("always_allow"):
+            chosen = _auto_allow_option(payload.get("options", []))
+            if chosen is not None:
+                tool = payload.get("tool_call", {}).get("title") or "tool call"
+                self._emit({"type": "notice", "agent_id": agent_id,
+                            "case_id": payload.get("case_id"),
+                            "message": f"auto-allowed (always allow): {tool}"})
+                return chosen
         request_id = uuid.uuid4().hex
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._permissions[request_id] = future

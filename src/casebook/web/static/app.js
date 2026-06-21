@@ -236,6 +236,7 @@ function renderModel(agentId) {
     const option = document.createElement("option");
     option.value = m.model_id;
     option.textContent = m.name || m.model_id;
+    if (m.description) option.title = m.description;
     return option;
   }));
   if (models.current) select.value = models.current;

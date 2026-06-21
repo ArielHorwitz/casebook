@@ -68,5 +68,22 @@ later, or delete it. Sessions working the same case coordinate through the
 filesystem, not through each other. Edit files in your own editor; the app
 watches the case directory and the agents read fresh on their next turn.
 
+### Model selection
+
+The per-session model dropdown lists exactly the models the backend advertises
+over ACP (`session/new` → `availableModels`), and switching uses ACP
+`session/set_model`. Casebook is vendor-agnostic, so it cannot offer a model the
+backend doesn't expose: if a backend advertises only coarse buckets, that is all
+ACP makes selectable. To pin a finer model, define separate backends — each
+launched with that backend's own model flags/env — and pick the one you want:
+
+```toml
+[backends.assistant-fast]
+command = ["some-acp-agent", "--model", "<fast model the agent understands>"]
+
+[backends.assistant-deep]
+command = ["some-acp-agent", "--model", "<deep model the agent understands>"]
+```
+
 See `docs/casebook/` decision notes for the design choices behind the
 implementation.

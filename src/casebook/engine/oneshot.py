@@ -13,7 +13,7 @@ import os
 import uuid
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from acp import PROTOCOL_VERSION, RequestPermissionResponse, spawn_agent_process, text_block
 from acp.interfaces import Client, ClientCapabilities, Implementation
@@ -48,8 +48,33 @@ class _CollectingClient(Client):
         raise PermissionError("filesystem unavailable for one-shot queries")
 
 
-async def one_shot(backend: Backend, project_root: Path, prompt: str) -> str:
-    """Spawn `backend`, send one prompt, and return the agent's concatenated reply."""
+def _resolve_model(preference: Optional[str], session_response: Any) -> Optional[str]:
+    """Match a loose model preference against what this session advertises (ACP)."""
+    state = getattr(session_response, "models", None)
+    if not preference or state is None:
+        return None
+    available = getattr(state, "available_models", None) or []
+    ids = [model.model_id for model in available]
+    if preference in ids:
+        return preference
+    lowered = preference.lower()
+    for model in available:
+        if lowered in model.model_id.lower() or lowered in (model.name or "").lower():
+            return model.model_id
+    return None
+
+
+async def one_shot(
+    backend: Backend,
+    project_root: Path,
+    prompt: str,
+    model: Optional[str] = None,
+) -> str:
+    """Spawn `backend`, send one prompt, and return the agent's concatenated reply.
+
+    If `model` is given and matches a model the backend advertises, it is selected
+    via ACP `session/set_model` before prompting.
+    """
     client = _CollectingClient()
     environment = {**os.environ, **backend.env}
     command, *args = backend.command
@@ -65,6 +90,14 @@ async def one_shot(backend: Backend, project_root: Path, prompt: str) -> str:
             client_info=Implementation(name="casebook", version="0.1.0"),
         )
         session = await conn.new_session(cwd=str(project_root), mcp_servers=[])
+        chosen = _resolve_model(model, session)
+        if chosen is not None:
+            try:
+                await conn.set_session_model(
+                    model_id=chosen, session_id=session.session_id
+                )
+            except Exception:
+                pass  # backend may not support set_model; proceed with its default
         await conn.prompt(
             prompt=[text_block(prompt)],
             session_id=session.session_id,

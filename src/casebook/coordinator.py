@@ -321,8 +321,17 @@ class CaseCoordinator:
                         "case_id": agent["case_id"],
                         "message": "nothing to name yet — the session has no messages"})
             return
+        # Echo has no language model, so it is never used to name a session. The
+        # naming backend defaults to the session's own backend when that isn't echo.
+        naming_backend = self.config.naming_backend or agent["backend"]
+        if not naming_backend or naming_backend == config.ECHO_BACKEND_NAME:
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": "session naming needs a non-echo backend — set "
+                                   "naming_backend in config.toml"})
+            return
         try:
-            backend = self.config.select_backend(agent["backend"] or None)
+            backend = self.config.select_backend(naming_backend)
         except KeyError as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
@@ -332,7 +341,9 @@ class CaseCoordinator:
         self._emit({"type": "notice", "agent_id": agent_id,
                     "case_id": agent["case_id"], "message": "naming session…"})
         try:
-            reply = await oneshot.one_shot(backend, self.project_root, prompt)
+            reply = await oneshot.one_shot(
+                backend, self.project_root, prompt, model=self.config.naming_model
+            )
         except Exception as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],

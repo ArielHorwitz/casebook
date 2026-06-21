@@ -29,6 +29,11 @@ default = "claude"
 # Instructions used by the "name session" button (optional; shown is the default).
 naming_prompt = "Reply with a concise title of at most six words for this session."
 
+# Which backend/model the "name session" button uses (optional). Defaults to the
+# session's own backend. The built-in `echo` backend is never used for naming.
+naming_backend = "claude"
+naming_model = "sonnet"
+
 # Preferred model, applied at session start when the backend advertises a match
 # (matches a model id or name, case-insensitively). Optional.
 default_model = "opus 4.8"

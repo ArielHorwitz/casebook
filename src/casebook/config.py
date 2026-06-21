@@ -96,6 +96,10 @@ class Config:
     default_backend: str
     naming_prompt: str = DEFAULT_NAMING_PROMPT
     default_model: Optional[str] = None
+    # Which backend/model names sessions. `echo` is never used for naming (it has
+    # no language model); when this resolves to echo, naming is unavailable.
+    naming_backend: Optional[str] = None
+    naming_model: Optional[str] = None
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend
@@ -154,4 +158,6 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         default_backend=default,
         naming_prompt=data.get("naming_prompt", DEFAULT_NAMING_PROMPT),
         default_model=data.get("default_model"),
+        naming_backend=data.get("naming_backend"),
+        naming_model=data.get("naming_model"),
     )

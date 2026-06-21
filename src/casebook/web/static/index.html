@@ -10,6 +10,7 @@
     <header id="topbar">
       <span class="brand">casebook</span>
       <span id="case-title"></span>
+      <button id="hotkey-hint" title="keyboard shortcuts">⌨</button>
       <span id="connection" class="disconnected">connecting…</span>
     </header>
     <div id="layout">
@@ -35,6 +36,13 @@
         </details>
         <p id="placeholder">Select a case to begin.</p>
       </main>
+    </div>
+
+    <div id="hotkey-help" hidden>
+      <div class="modal-body">
+        <header><span>Keyboard shortcuts</span><button id="hotkey-help-close">×</button></header>
+        <div id="hotkey-help-body"></div>
+      </div>
     </div>
 
     <div id="file-modal" hidden>

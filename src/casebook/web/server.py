@@ -57,6 +57,9 @@ def create_app(project_root: Path) -> Starlette:
     async def list_backends(_request: Request) -> JSONResponse:
         return JSONResponse(engine().list_backends())
 
+    async def hotkeys(_request: Request) -> JSONResponse:
+        return JSONResponse(engine().hotkeys())
+
     async def case_detail(request: Request) -> JSONResponse:
         try:
             return JSONResponse(engine().case_detail(request.path_params["case_id"]))
@@ -82,6 +85,7 @@ def create_app(project_root: Path) -> Starlette:
             Route("/", index),
             Route("/api/cases", cases_endpoint, methods=["GET", "POST"]),
             Route("/api/backends", list_backends),
+            Route("/api/hotkeys", hotkeys),
             Route("/api/cases/{case_id}", case_detail),
             Route("/api/cases/{case_id}/files/{filename}", case_file),
             WebSocketRoute("/ws", websocket_endpoint),

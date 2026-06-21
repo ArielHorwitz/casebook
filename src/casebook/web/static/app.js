@@ -8,6 +8,8 @@ const state = {
   transcripts: new Map(), // agent_id -> [item]
   models: new Map(), // agent_id -> {available: [{model_id, name}], current}
   panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
+  focusedAgent: null, // agent_id of the keyboard-focused session pane
+  hotkeyByKey: new Map(), // KeyboardEvent.key -> action name
 };
 
 const el = (id) => document.getElementById(id);
@@ -187,21 +189,14 @@ function buildPane(agent) {
   cancelBtn.onclick = () => send({ action: "cancel", agent_id: agent.agent_id });
   const allowInput = root.querySelector(".allow input");
   allowInput.onchange = () => send({ action: "set_always_allow", agent_id: agent.agent_id, value: allowInput.checked });
-  root.querySelector(".rename").onclick = () => {
-    const current = (state.agents.get(agent.agent_id) || agent).label;
-    const label = prompt("Session name:", current);
-    if (label && label.trim()) send({ action: "rename_agent", agent_id: agent.agent_id, label: label.trim() });
-  };
+  root.querySelector(".rename").onclick = () => sessionRename(agent.agent_id);
   root.querySelector(".autoname").onclick = () => send({ action: "name_agent", agent_id: agent.agent_id });
   const modelSelect = root.querySelector(".model");
   modelSelect.onchange = () => send({ action: "set_model", agent_id: agent.agent_id, model_id: modelSelect.value });
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
-  root.querySelector(".delete").onclick = () => {
-    if (confirm("Delete this session and its history?")) {
-      send({ action: "delete_agent", agent_id: agent.agent_id });
-    }
-  };
+  root.querySelector(".delete").onclick = () => sessionDelete(agent.agent_id);
+  root.addEventListener("mousedown", () => focusPane(agent.agent_id));
 
   const pane = {
     root,
@@ -333,11 +328,121 @@ function applyPaneVisibility() {
   for (const [agentId, pane] of state.panes) {
     const agent = state.agents.get(agentId);
     pane.root.hidden = !agent || agent.case_id !== state.activeCase;
+    pane.root.classList.toggle("focused", agentId === state.focusedAgent);
   }
   const hasCase = state.activeCase !== null;
   el("add-agent").hidden = !hasCase;
   el("placeholder").hidden = hasCase;
   el("case-meta").hidden = !hasCase;
+}
+
+// --- keyboard focus + shortcuts -------------------------------------------
+function visiblePaneIds() {
+  return [...state.panes.keys()].filter((id) => {
+    const agent = state.agents.get(id);
+    return agent && agent.case_id === state.activeCase;
+  });
+}
+
+function focusPane(agentId) {
+  if (!state.panes.has(agentId)) return;
+  state.focusedAgent = agentId;
+  for (const [id, pane] of state.panes) pane.root.classList.toggle("focused", id === agentId);
+}
+
+function focusStep(delta) {
+  const ids = visiblePaneIds();
+  if (ids.length === 0) return;
+  const current = ids.indexOf(state.focusedAgent);
+  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
+  focusPane(ids[next]);
+  const pane = state.panes.get(ids[next]);
+  if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+
+// Session actions shared by buttons and hotkeys.
+function sessionRename(agentId) {
+  const current = (state.agents.get(agentId) || {}).label || "";
+  const label = prompt("Session name:", current);
+  if (label && label.trim()) send({ action: "rename_agent", agent_id: agentId, label: label.trim() });
+}
+function sessionDelete(agentId) {
+  if (confirm("Delete this session and its history?")) send({ action: "delete_agent", agent_id: agentId });
+}
+function sessionToggleAllow(agentId) {
+  const pane = state.panes.get(agentId);
+  if (!pane) return;
+  pane.allowInput.checked = !pane.allowInput.checked;
+  send({ action: "set_always_allow", agent_id: agentId, value: pane.allowInput.checked });
+}
+
+function newSession() {
+  if (state.activeCase) {
+    send({ action: "add_agent", case_id: state.activeCase, backend: el("backend-select").value });
+  }
+}
+async function newCase() {
+  const title = prompt("New case title:", "Unnamed case");
+  if (title === null) return;
+  const summary = await fetch("/api/cases", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: title.trim() || "Unnamed case" }),
+  }).then((r) => r.json());
+  await loadCases();
+  openCase(summary.case_id);
+}
+
+function runAction(action) {
+  const id = state.focusedAgent;
+  const agent = id && state.agents.get(id);
+  switch (action) {
+    case "new_case": return newCase();
+    case "new_session": return newSession();
+    case "focus_next": return focusStep(1);
+    case "focus_prev": return focusStep(-1);
+    case "help": return toggleHelp();
+  }
+  if (!agent) return; // session-targeted actions need a focused pane
+  switch (action) {
+    case "rename_session": return sessionRename(id);
+    case "name_session": return send({ action: "name_agent", agent_id: id });
+    case "resume_session": if (!agent.live) send({ action: "resume_agent", agent_id: id }); return;
+    case "close_session": if (agent.live) send({ action: "close_agent", agent_id: id }); return;
+    case "delete_session": return sessionDelete(id);
+    case "toggle_allow": return sessionToggleAllow(id);
+    case "cancel_turn": return send({ action: "cancel", agent_id: id });
+  }
+}
+
+function isTyping() {
+  const node = document.activeElement;
+  if (!node) return false;
+  const tag = node.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable;
+}
+
+function onKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.key === "Escape" && !el("hotkey-help").hidden) return toggleHelp();
+  if (isTyping()) return;
+  const action = state.hotkeyByKey.get(event.key);
+  if (!action) return;
+  event.preventDefault();
+  runAction(action);
+}
+
+async function loadHotkeys() {
+  const map = await fetch("/api/hotkeys").then((r) => r.json());
+  state.hotkeyByKey = new Map(Object.entries(map).map(([action, key]) => [key, action]));
+  const rows = Object.entries(map)
+    .map(([action, key]) => `<tr><td>${key}</td><td>${action.replace(/_/g, " ")}</td></tr>`)
+    .join("");
+  el("hotkey-help-body").innerHTML = `<table>${rows}</table>`;
+}
+
+function toggleHelp() {
+  el("hotkey-help").hidden = !el("hotkey-help").hidden;
 }
 
 // --- cases ----------------------------------------------------------------
@@ -362,6 +467,8 @@ async function openCase(caseId) {
   const detail = await fetch(`/api/cases/${caseId}`).then((r) => r.json());
   el("case-title").textContent = detail.title || caseId;
   renderFiles(detail.files || []);
+  const ids = visiblePaneIds();
+  state.focusedAgent = ids.includes(state.focusedAgent) ? state.focusedAgent : (ids[0] || null);
   applyPaneVisibility();
 }
 
@@ -398,27 +505,17 @@ async function loadBackends() {
 }
 
 // --- wiring ---------------------------------------------------------------
-el("add-agent").onclick = () => {
-  if (state.activeCase) {
-    send({ action: "add_agent", case_id: state.activeCase, backend: el("backend-select").value });
-  }
-};
-el("new-case").onclick = async () => {
-  const title = prompt("New case title:", "Unnamed case");
-  if (title === null) return;
-  const summary = await fetch("/api/cases", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: title.trim() || "Unnamed case" }),
-  }).then((r) => r.json());
-  await loadCases();
-  openCase(summary.case_id);
-};
+el("add-agent").onclick = newSession;
+el("new-case").onclick = newCase;
 el("file-modal-close").onclick = () => (el("file-modal").hidden = true);
 el("file-modal").onclick = (e) => {
   if (e.target.id === "file-modal") el("file-modal").hidden = true;
 };
+el("hotkey-help-close").onclick = toggleHelp;
+el("hotkey-hint").onclick = toggleHelp;
+document.addEventListener("keydown", onKeydown);
 
 loadCases();
 loadBackends();
+loadHotkeys();
 connect();

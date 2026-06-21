@@ -43,7 +43,12 @@ command = ["claude-code-acp"]
 
 [backends.gemini]
 command = ["gemini", "--experimental-acp"]
-```
+
+# Keyboard shortcuts (optional; any subset overrides the defaults). Press ? in the
+# app — or click the ⌨ button — to see the active bindings.
+[hotkeys]
+new_session = "n"
+focus_next = "]"
 
 ## CLI
 
@@ -67,6 +72,10 @@ are persisted and resumable: close one to stop it but keep its history, resume i
 later, or delete it. Sessions working the same case coordinate through the
 filesystem, not through each other. Edit files in your own editor; the app
 watches the case directory and the agents read fresh on their next turn.
+
+Keyboard shortcuts drive the common actions (new case/session, focus between
+sessions, rename/name/resume/close/delete, toggle always-allow, cancel) — press
+`?` or click the ⌨ button to see the bindings; customize them under `[hotkeys]`.
 
 ### Model selection
 

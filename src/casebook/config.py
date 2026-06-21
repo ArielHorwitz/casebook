@@ -49,6 +49,25 @@ DEFAULT_NAMING_PROMPT = (
 )
 
 
+# Default keyboard shortcuts (action -> key). Override individually in config.toml
+# under a `[hotkeys]` table. Keys are matched against the browser's KeyboardEvent
+# `key` value, so e.g. "?" is shift+/ and "]" is the literal bracket.
+DEFAULT_HOTKEYS = {
+    "new_case": "c",
+    "new_session": "n",
+    "focus_next": "]",
+    "focus_prev": "[",
+    "rename_session": "r",
+    "name_session": "g",
+    "resume_session": "e",
+    "close_session": "x",
+    "delete_session": "d",
+    "toggle_allow": "a",
+    "cancel_turn": "s",
+    "help": "?",
+}
+
+
 @dataclass(frozen=True)
 class Backend:
     """A launchable ACP agent backend."""
@@ -100,6 +119,7 @@ class Config:
     # no language model); when this resolves to echo, naming is unavailable.
     naming_backend: Optional[str] = None
     naming_model: Optional[str] = None
+    hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend
@@ -160,4 +180,5 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         default_model=data.get("default_model"),
         naming_backend=data.get("naming_backend"),
         naming_model=data.get("naming_model"),
+        hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
     )

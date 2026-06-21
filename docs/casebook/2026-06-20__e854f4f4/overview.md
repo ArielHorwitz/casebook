@@ -7,6 +7,12 @@ Triage and prioritization of user feedback from the initial implementation
 > [post-feedback-implementation-summary.md](post-feedback-implementation-summary.md)
 > for what shipped and the design decisions. The triage below is retained as the
 > original analysis.
+>
+> **Round-2 feedback** (naming model, model granularity, hotkeys) and the
+> reaffirmed ACP-only constraint are tracked in
+> [round2-feedback-naming-model-hotkeys.md](round2-feedback-naming-model-hotkeys.md).
+> Note: explicit opus-4.8-vs-4.6 selection is **not possible through ACP** when the
+> backend only advertises coarse models — recorded there.
 
 ## Feedback items
 

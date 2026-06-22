@@ -76,14 +76,27 @@ class CaseCoordinator:
         # Transcript to prepend to a resumed session's next message, for backends
         # that lack native session/load. Keyed by agent_id, consumed once.
         self._pending_context: dict[str, str] = {}
+        # Whether a session still has its auto-assigned name, and which sessions
+        # have been written to disk. A session with no messages and an auto name is
+        # "trivial" — identical to a brand-new one — and is never persisted.
+        self._auto_named: dict[str, bool] = {}
+        self._persisted: set[str] = set()
         self._permissions: dict[str, asyncio.Future] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
     def load_persisted(self) -> None:
-        """Restore every session on disk as a (non-live) stored session."""
+        """Restore every session on disk as a (non-live) stored session.
+
+        Trivial leftovers (no messages and an auto name) are dropped — they're
+        identical to a brand-new session and resuming them is pointless.
+        """
         for stored in self.store.load_all():
             meta = stored.meta
             agent_id = meta["agent_id"]
+            named = bool(meta.get("named", False))
+            if not stored.transcript and not named:
+                self.store.delete(meta["case_id"], agent_id)
+                continue
             self._agents[agent_id] = {
                 "agent_id": agent_id,
                 "case_id": meta["case_id"],
@@ -96,7 +109,18 @@ class CaseCoordinator:
             }
             self._acp_ids[agent_id] = meta.get("acp_session_id")
             self._created[agent_id] = meta.get("created")
+            self._auto_named[agent_id] = not named
+            self._persisted.add(agent_id)
             self._transcripts[agent_id] = list(stored.transcript)
+
+    def _should_persist(self, agent_id: str) -> bool:
+        """A session is worth saving once it has a message or a custom name."""
+        if not self._auto_named.get(agent_id, True):
+            return True
+        return any(
+            event.get("type") == "message"
+            for event in self._transcripts.get(agent_id, [])
+        )
 
     # --- single emit choke point: record, persist, then publish ----------
     def _emit(self, event: dict) -> None:
@@ -105,10 +129,19 @@ class CaseCoordinator:
             self._agents[agent_id]["state"] = event.get("state")
         if agent_id in self._agents and event.get("type") in _REPLAYABLE:
             self._transcripts.setdefault(agent_id, []).append(event)
-            self.store.append_event(self._agents[agent_id]["case_id"], agent_id, event)
+            # Only commit to disk once the session is non-trivial; the first real
+            # content writes the metadata so meta.toml and the transcript stay paired.
+            if agent_id in self._persisted or self._should_persist(agent_id):
+                self._persist_meta(agent_id)
+                self.store.append_event(self._agents[agent_id]["case_id"], agent_id, event)
         self.bus.publish(event)
 
     def _persist_meta(self, agent_id: str) -> None:
+        if agent_id not in self._agents:
+            return
+        if agent_id not in self._persisted and not self._should_persist(agent_id):
+            return  # trivial session: keep it off disk entirely
+        self._persisted.add(agent_id)
         agent = self._agents[agent_id]
         self.store.write_meta(
             {
@@ -118,6 +151,7 @@ class CaseCoordinator:
                 "backend": agent["backend"],
                 "model": agent.get("model"),
                 "always_allow": agent.get("always_allow", False),
+                "named": not self._auto_named.get(agent_id, True),
                 "acp_session_id": self._acp_ids.get(agent_id),
                 "created": self._created.get(agent_id),
                 "last_active": _now_iso(),
@@ -194,6 +228,7 @@ class CaseCoordinator:
         self.sessions.add(session)
         self._created[agent_id] = _now_iso()
         self._acp_ids[agent_id] = None
+        self._auto_named[agent_id] = True
         self._agents[agent_id] = {
             "agent_id": agent_id,
             "case_id": case.case_id,
@@ -214,6 +249,8 @@ class CaseCoordinator:
             self._agents.pop(agent_id, None)
             self._acp_ids.pop(agent_id, None)
             self._created.pop(agent_id, None)
+            self._auto_named.pop(agent_id, None)
+            self._persisted.discard(agent_id)
             self.store.delete(case.case_id, agent_id)
             self._emit({"type": "agent_removed", "agent_id": agent_id,
                         "case_id": case.case_id})
@@ -337,6 +374,7 @@ class CaseCoordinator:
         if agent is None or not label:
             return
         agent["label"] = label
+        self._auto_named[agent_id] = False  # a custom name makes it worth keeping
         self._persist_meta(agent_id)
         self._emit({"type": "agent_updated", **agent})
 
@@ -415,7 +453,14 @@ class CaseCoordinator:
             await session.cancel()
 
     async def close_agent(self, agent_id: str) -> None:
-        """Stop the subprocess but keep the session on disk so it can be resumed."""
+        """Collapse a session to stored, or discard it if it's trivial.
+
+        A session with no messages and an auto name is identical to a brand-new
+        one, so closing it deletes it rather than leaving a pointless resumable.
+        """
+        if agent_id in self._agents and not self._should_persist(agent_id):
+            await self.delete_agent(agent_id)
+            return
         session = self.sessions.pop(agent_id)
         agent = self._agents.get(agent_id)
         if session is not None:
@@ -437,6 +482,8 @@ class CaseCoordinator:
         self._created.pop(agent_id, None)
         self._models.pop(agent_id, None)
         self._pending_context.pop(agent_id, None)
+        self._auto_named.pop(agent_id, None)
+        self._persisted.discard(agent_id)
         if session is not None:
             await session.stop()
         if agent is not None:

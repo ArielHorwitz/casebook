@@ -31,6 +31,12 @@ Triage and prioritization of user feedback from the initial implementation
 > **Round-6 feedback** (configuration was underdocumented → dedicated
 > `docs/configuration/` reference for backends and hotkeys) is tracked in
 > [round6-configuration-docs.md](round6-configuration-docs.md).
+>
+> **Round-7 feedback** (don't persist trivial empty sessions; ACP usage vs.
+> subscription limits; configurable session-column width; home hotkey; and the
+> note that all sessions run server-side regardless of what's on screen) is
+> tracked in
+> [round7-trivial-sessions-usage-sizing.md](round7-trivial-sessions-usage-sizing.md).
 
 ## Feedback items
 

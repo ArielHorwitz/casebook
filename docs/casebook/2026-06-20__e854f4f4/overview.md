@@ -22,6 +22,11 @@ Triage and prioritization of user feedback from the initial implementation
 > with the directive prepended to the first message, markdown file previews with
 > Esc-to-close) is tracked in
 > [round4-bootstrap-and-ui-polish.md](round4-bootstrap-and-ui-polish.md).
+>
+> **Round-5 feedback** (Enter/Escape input focus for a full keyboard flow; close
+> collapses a session to the sidebar while delete removes it; all sessions listed
+> in the sidebar) is tracked in
+> [round5-sidebar-sessions-keyboard-focus.md](round5-sidebar-sessions-keyboard-focus.md).
 
 ## Feedback items
 

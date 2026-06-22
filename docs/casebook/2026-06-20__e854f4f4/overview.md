@@ -17,6 +17,11 @@ Triage and prioritization of user feedback from the initial implementation
 > **Round-3 feedback** (lazy transcript replay on resume, toast notifications,
 > a dedicated page per case) is tracked in
 > [round3-resume-toasts-page-per-case.md](round3-resume-toasts-page-per-case.md).
+>
+> **Round-4 feedback** (two-row session header, no agent query on session start
+> with the directive prepended to the first message, markdown file previews with
+> Esc-to-close) is tracked in
+> [round4-bootstrap-and-ui-polish.md](round4-bootstrap-and-ui-polish.md).
 
 ## Feedback items
 

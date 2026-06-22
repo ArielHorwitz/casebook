@@ -62,7 +62,6 @@ DEFAULT_HOTKEYS = {
     "open_focused": "Enter",
     "rename_session": "r",
     "name_session": "g",
-    "resume_session": "e",
     "close_session": "x",
     "delete_session": "d",
     "toggle_allow": "a",

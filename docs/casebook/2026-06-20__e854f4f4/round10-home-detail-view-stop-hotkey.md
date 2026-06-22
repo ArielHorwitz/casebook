@@ -15,7 +15,16 @@ Reworked to match the intended layout:
 
 ## 2. Keyboard stop for a running turn
 
-`cancel_turn` (the `s` hotkey) already existed but only targeted the focused
-session. It now stops the focused session if it's working, otherwise **any**
-running session — so a long tool call can be aborted from the keyboard even if
-focus has moved. (It mirrors the pane's Stop button.)
+`cancel_turn` (the `s` hotkey) already existed; the user just hadn't noticed it.
+It stops **only the focused session's** turn (mirrors the pane's Stop button) —
+deliberately never reaching for other sessions.
+
+(A brief experiment to make it stop any running session was reverted at the
+user's request — stopping should be a precise, non-destructive action on the
+session you're looking at.)
+
+## 3. Dropped the resume_session hotkey
+
+`resume_session` (`e`) was removed as redundant: a focused **closed** session is
+opened/resumed by `open_focused` (Enter) or a click — which both reveals it and
+resumes it. One fewer binding to remember.

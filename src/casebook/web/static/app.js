@@ -628,23 +628,18 @@ function runAction(action) {
   switch (action) {
     case "rename_session": return sessionRename(id);
     case "name_session": return send({ action: "name_agent", agent_id: id });
-    case "resume_session": if (!agent.live) send({ action: "resume_agent", agent_id: id }); return;
     case "close_session": if (agent.live) send({ action: "close_agent", agent_id: id }); return;
     case "delete_session": return sessionDelete(id);
     case "toggle_allow": return sessionToggleAllow(id);
   }
 }
 
-// Stop a running turn — the focused session if it's working, otherwise whatever
-// is running (so a long tool call can be stopped even if focus has moved).
+// Stop the focused session's running turn. Only ever the focused session — never
+// reaches for other sessions.
 function cancelTurn() {
-  if (route.mode !== "case") return;
-  const working = [...state.agents.values()]
-    .filter((a) => a.live && (a.state === "working" || a.state === "starting"))
-    .map((a) => a.agent_id);
-  if (working.length === 0) return;
-  const targets = working.includes(state.focusedAgent) ? [state.focusedAgent] : working;
-  for (const id of targets) send({ action: "cancel", agent_id: id });
+  if (route.mode === "case" && state.focusedAgent) {
+    send({ action: "cancel", agent_id: state.focusedAgent });
+  }
 }
 
 function isTyping() {

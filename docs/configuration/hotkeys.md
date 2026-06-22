@@ -28,11 +28,10 @@ page (sessions).
 | `open_focused` | `Enter` | home / case | Home: open the focused case. Case page: focus the open session's input box, or open (resume) the focused session if it's closed. |
 | `rename_session` | `r` | case page | Rename the focused session (prompt). |
 | `name_session` | `g` | case page | Ask the model to name the focused session. |
-| `resume_session` | `e` | case page | Open (resume) the focused session if it's closed. |
 | `close_session` | `x` | case page | Close the focused session if it's open (collapses it to the sidebar). |
 | `delete_session` | `d` | home / case | Case page: delete the focused session. Home page: delete the focused case and all its sessions. Both ask to confirm. |
 | `toggle_allow` | `a` | case page | Toggle "always allow" permissions on the focused session. |
-| `cancel_turn` | `s` | case page | Stop a running turn — the focused session if it's working, otherwise any running session (e.g. to abort a long tool call). |
+| `cancel_turn` | `s` | case page | Stop the focused session's running turn (e.g. to abort a long tool call). |
 | `help` | `?` | anywhere | Toggle the shortcuts overlay. |
 
 ### Always-on keys (not configurable)

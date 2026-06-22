@@ -49,14 +49,15 @@ DEFAULT_NAMING_PROMPT = (
 )
 
 
-# Default keyboard shortcuts (action -> key). Override individually in config.toml
-# under a `[hotkeys]` table. Keys are matched against the browser's KeyboardEvent
-# `key` value, so e.g. "?" is shift+/ and "]" is the literal bracket.
+# Default keyboard shortcuts (action -> key, or a list of keys). Override
+# individually in config.toml under a `[hotkeys]` table. Keys are matched against
+# the browser's KeyboardEvent `key` value, so e.g. "?" is shift+/, "]" is the
+# literal bracket, and arrow keys are "ArrowDown"/"ArrowRight"/etc.
 DEFAULT_HOTKEYS = {
     "new_case": "c",
     "new_session": "n",
-    "focus_next": "]",
-    "focus_prev": "[",
+    "focus_next": ["]", "ArrowRight", "ArrowDown"],
+    "focus_prev": ["[", "ArrowLeft", "ArrowUp"],
     "open_focused": "Enter",
     "rename_session": "r",
     "name_session": "g",
@@ -120,7 +121,8 @@ class Config:
     # no language model); when this resolves to echo, naming is unavailable.
     naming_backend: Optional[str] = None
     naming_model: Optional[str] = None
-    hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
+    # Action -> key, or a list of keys (the browser binds each to that action).
+    hotkeys: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend

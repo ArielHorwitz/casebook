@@ -44,11 +44,12 @@ command = ["claude-code-acp"]
 [backends.gemini]
 command = ["gemini", "--experimental-acp"]
 
-# Keyboard shortcuts (optional; any subset overrides the defaults). Press ? in the
-# app — or click the ⌨ button — to see the active bindings.
+# Keyboard shortcuts (optional; any subset overrides the defaults). A binding is a
+# key or a list of keys. Press ? in the app — or click the ⌨ button — to see the
+# active bindings. focus_next/prev default to "]"/"[" plus the arrow keys.
 [hotkeys]
 new_session = "n"
-focus_next = "]"
+focus_next = ["]", "ArrowRight", "ArrowDown"]
 
 ## CLI
 

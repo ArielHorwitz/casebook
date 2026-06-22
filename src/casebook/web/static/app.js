@@ -585,9 +585,16 @@ function onKeydown(event) {
 
 async function loadHotkeys() {
   const map = await fetch("/api/hotkeys").then((r) => r.json());
-  state.hotkeyByKey = new Map(Object.entries(map).map(([action, key]) => [key, action]));
+  // A binding may be a single key or a list of keys.
+  state.hotkeyByKey = new Map();
+  for (const [action, keys] of Object.entries(map)) {
+    for (const key of Array.isArray(keys) ? keys : [keys]) state.hotkeyByKey.set(key, action);
+  }
   const rows = Object.entries(map)
-    .map(([action, key]) => `<tr><td>${key}</td><td>${action.replace(/_/g, " ")}</td></tr>`)
+    .map(([action, keys]) => {
+      const shown = (Array.isArray(keys) ? keys : [keys]).join(" / ");
+      return `<tr><td>${shown}</td><td>${action.replace(/_/g, " ")}</td></tr>`;
+    })
     .join("");
   el("hotkey-help-body").innerHTML = `<table>${rows}</table>`;
 }

@@ -13,6 +13,10 @@ Triage and prioritization of user feedback from the initial implementation
 > [round2-feedback-naming-model-hotkeys.md](round2-feedback-naming-model-hotkeys.md).
 > Note: explicit opus-4.8-vs-4.6 selection is **not possible through ACP** when the
 > backend only advertises coarse models — recorded there.
+>
+> **Round-3 feedback** (lazy transcript replay on resume, toast notifications,
+> a dedicated page per case) is tracked in
+> [round3-resume-toasts-page-per-case.md](round3-resume-toasts-page-per-case.md).
 
 ## Feedback items
 

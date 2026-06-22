@@ -23,19 +23,21 @@
           </div>
           <ul id="case-list"></ul>
         </div>
-        <div id="files-nav" hidden>
-          <div class="sidebar-head"><h2>Files</h2></div>
+        <div id="case-nav" hidden>
+          <div class="sidebar-head">
+            <h2>Sessions</h2>
+            <button id="add-agent" title="new session">+</button>
+          </div>
+          <select id="backend-select" title="backend for new sessions" hidden></select>
+          <ul id="session-list"></ul>
+          <div class="sidebar-head files-head"><h2>Files</h2></div>
           <ul id="file-list"></ul>
         </div>
       </aside>
       <main id="workspace">
         <section id="agents" hidden>
-          <div id="session-bar">
-            <h3>Sessions</h3>
-            <select id="backend-select" title="backend for new sessions" hidden></select>
-            <button id="add-agent">+ session</button>
-          </div>
           <div id="agent-panes"></div>
+          <p id="no-open-sessions" hidden>No open sessions — add one with + or open a closed session from the sidebar.</p>
         </section>
         <p id="placeholder">Select a case to open it on its own page.</p>
       </main>

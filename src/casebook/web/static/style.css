@@ -100,19 +100,41 @@ body {
 #file-list li:hover { border-color: var(--accent); }
 
 #agents { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 8px; gap: 8px; }
-#session-bar { display: flex; align-items: center; gap: 12px; }
-#session-bar h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 0; }
 #agent-panes { display: flex; gap: 8px; flex: 1; min-height: 0; overflow-x: auto; }
+#no-open-sessions { color: var(--muted); margin: auto; text-align: center; max-width: 320px; }
 #add-agent {
   background: var(--panel-2);
   color: var(--text);
   border: 1px dashed var(--border);
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 1px 9px;
   cursor: pointer;
-  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.3;
 }
 #add-agent:hover { border-color: var(--accent); }
+
+/* Sessions list (sidebar) — the source of truth for every session. */
+.files-head { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+#case-nav #backend-select { margin: 4px 0 6px; width: 100%; }
+#session-list { list-style: none; margin: 0 0 4px; padding: 0; }
+.session-item { display: flex; align-items: center; border-radius: 6px; }
+.session-item:hover { background: var(--panel-2); }
+.session-item.focused { outline: 1px solid var(--accent); }
+.session-item .open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  background: none; border: none; color: inherit; cursor: pointer;
+  padding: 6px 8px; text-align: left;
+}
+.session-item .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item .session-meta { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.session-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.session-item .dot.working, .session-item .dot.starting { background: var(--accent); }
+.session-item .dot.idle { background: #9ece6a; }
+.session-item .rename, .session-item .trash {
+  background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 4px 6px;
+}
+.session-item .rename:hover, .session-item .trash:hover { color: var(--text); }
 
 .agent-pane {
   display: flex;

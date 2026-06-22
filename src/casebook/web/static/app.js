@@ -116,28 +116,46 @@ function applySnapshot(snapshot) {
   for (const [agentId, events] of Object.entries(snapshot.transcripts || {})) {
     for (const event of events) applyToTranscript(event);
   }
-  const ids = visiblePaneIds();
+  const ids = sessionIds();
   if (!ids.includes(state.focusedAgent)) state.focusedAgent = ids[0] || null;
+  renderSessionList();
   applyPaneVisibility();
 }
 
 // Handles both agent_added and agent_updated (e.g. live <-> stored transitions).
+// A pane is built only for an open (live) session; closed ones live in the
+// sidebar list and take no pane space until reopened.
 function upsertAgent(agent) {
   if (route.mode !== "case" || agent.case_id !== route.caseId) return;
   state.agents.set(agent.agent_id, agent);
   if (!state.transcripts.has(agent.agent_id)) state.transcripts.set(agent.agent_id, []);
-  buildPane(agent);
-  updateHead(agent.agent_id);
-  if (!state.focusedAgent) focusPane(agent.agent_id);
+  if (agent.live) {
+    buildPane(agent);
+    updateHead(agent.agent_id);
+  } else {
+    removePaneOnly(agent.agent_id);
+  }
+  if (!state.focusedAgent) state.focusedAgent = agent.agent_id;
+  renderSessionList();
+  applyPaneVisibility();
 }
 
-function removeAgent(agentId) {
+// Drop a session's pane from the main area but keep its state and transcript so
+// reopening it restores the history.
+function removePaneOnly(agentId) {
   const pane = state.panes.get(agentId);
   if (pane) pane.root.remove();
   state.panes.delete(agentId);
+}
+
+function removeAgent(agentId) {
+  removePaneOnly(agentId);
   state.agents.delete(agentId);
   state.transcripts.delete(agentId);
   state.models.delete(agentId);
+  if (state.focusedAgent === agentId) state.focusedAgent = sessionIds()[0] || null;
+  renderSessionList();
+  applyPaneVisibility();
 }
 
 // Mutate the transcript array, then re-render just that agent's transcript.
@@ -237,7 +255,7 @@ function buildPane(agent) {
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => sessionDelete(agent.agent_id);
-  root.addEventListener("mousedown", () => focusPane(agent.agent_id));
+  root.addEventListener("mousedown", () => focusSession(agent.agent_id));
 
   const pane = {
     root,
@@ -366,35 +384,84 @@ function renderItem(agentId, item) {
   return document.createElement("div");
 }
 
-// On a case page, every pane belongs to this case; just track the focus marker.
+// All sessions of this case, in stable insertion order (live and closed alike).
+function sessionIds() {
+  return [...state.agents.keys()];
+}
+
+// The sidebar Sessions list is the source of truth for every session; the main
+// area mirrors only the open (live) ones as panes.
+function renderSessionList() {
+  const list = el("session-list");
+  if (!list) return;
+  list.replaceChildren();
+  for (const agentId of sessionIds()) {
+    const agent = state.agents.get(agentId);
+    const li = document.createElement("li");
+    li.dataset.agentId = agentId;
+    li.className = "session-item" + (agentId === state.focusedAgent ? " focused" : "");
+    const dot = `<span class="dot ${agent.state || ""}"></span>`;
+    const meta = agent.live ? (agent.state || "live") : "closed";
+    li.innerHTML =
+      `<button class="open">${dot}<span class="name"></span>` +
+      `<span class="session-meta">${meta}</span></button>` +
+      `<button class="rename" title="rename">✎</button>` +
+      `<button class="trash" title="delete session and history">🗑</button>`;
+    li.querySelector(".name").textContent = agent.label;
+    li.querySelector(".open").onclick = () => activateSession(agentId);
+    li.querySelector(".rename").onclick = () => sessionRename(agentId);
+    li.querySelector(".trash").onclick = () => sessionDelete(agentId);
+    list.appendChild(li);
+  }
+}
+
+// Clicking a session focuses its pane (if open) or opens it (if closed).
+function activateSession(agentId) {
+  const agent = state.agents.get(agentId);
+  if (!agent) return;
+  state.focusedAgent = agentId;
+  if (agent.live) {
+    const pane = state.panes.get(agentId);
+    if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+  } else {
+    send({ action: "resume_agent", agent_id: agentId });
+  }
+  applyPaneVisibility();
+}
+
+// Mark the focused session in the sidebar and (if open) its pane, and show a
+// hint when nothing is open in the main area.
 function applyPaneVisibility() {
   for (const [agentId, pane] of state.panes) {
     pane.root.classList.toggle("focused", agentId === state.focusedAgent);
   }
+  for (const li of document.querySelectorAll("#session-list li")) {
+    li.classList.toggle("focused", li.dataset.agentId === state.focusedAgent);
+  }
+  const hint = el("no-open-sessions");
+  if (hint) hint.hidden = state.panes.size > 0;
 }
 
 // --- keyboard focus + shortcuts -------------------------------------------
-function visiblePaneIds() {
-  return [...state.panes.keys()];
-}
-
-function focusPane(agentId) {
-  if (!state.panes.has(agentId)) return;
+function focusSession(agentId) {
+  if (!state.agents.has(agentId)) return;
   state.focusedAgent = agentId;
-  for (const [id, pane] of state.panes) pane.root.classList.toggle("focused", id === agentId);
+  applyPaneVisibility();
+  const pane = state.panes.get(agentId);
+  if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+  const li = document.querySelector(`#session-list li[data-agent-id="${CSS.escape(agentId)}"]`);
+  if (li) li.scrollIntoView({ block: "nearest" });
 }
 
-// Focus moves between session panes on a case page, or between cases on home —
-// the same hotkeys, scoped to whatever the page shows.
+// Focus moves between sessions on a case page, or between cases on home — the
+// same hotkeys, scoped to whatever the page shows.
 function focusStep(delta) {
   if (route.mode === "home") return focusCaseStep(delta);
-  const ids = visiblePaneIds();
+  const ids = sessionIds();
   if (ids.length === 0) return;
   const current = ids.indexOf(state.focusedAgent);
   const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
-  focusPane(ids[next]);
-  const pane = state.panes.get(ids[next]);
-  if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+  focusSession(ids[next]);
 }
 
 function caseIds() {
@@ -454,8 +521,21 @@ function caseUrl(caseId) {
   return `/case/${encodeURIComponent(caseId)}`;
 }
 
-function openFocusedCase() {
-  if (state.focusedCase) location.href = caseUrl(state.focusedCase);
+// Enter: open the focused case (home), or — on a case page — focus the open
+// session's composer, or open the focused session if it's closed.
+function openFocused() {
+  if (route.mode === "home") {
+    if (state.focusedCase) location.href = caseUrl(state.focusedCase);
+    return;
+  }
+  const agent = state.focusedAgent && state.agents.get(state.focusedAgent);
+  if (!agent) return;
+  if (agent.live) {
+    const pane = state.panes.get(state.focusedAgent);
+    if (pane) pane.input.focus();
+  } else {
+    activateSession(state.focusedAgent);
+  }
 }
 
 function runAction(action) {
@@ -466,10 +546,10 @@ function runAction(action) {
     case "new_session": return newSession();
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
-    case "open_focused": return route.mode === "home" ? openFocusedCase() : undefined;
+    case "open_focused": return openFocused();
     case "help": return toggleHelp();
   }
-  if (route.mode !== "case" || !agent) return; // session actions need a focused pane
+  if (route.mode !== "case" || !agent) return; // session actions need a focused session
   switch (action) {
     case "rename_session": return sessionRename(id);
     case "name_session": return send({ action: "name_agent", agent_id: id });
@@ -493,6 +573,8 @@ function onKeydown(event) {
   if (event.key === "Escape") {
     if (!el("file-modal").hidden) return (el("file-modal").hidden = true);
     if (!el("hotkey-help").hidden) return toggleHelp();
+    // Leave the composer and return to keyboard navigation.
+    if (isTyping()) return document.activeElement.blur();
   }
   if (isTyping()) return;
   const action = state.hotkeyByKey.get(event.key);
@@ -587,7 +669,7 @@ function applyRoute() {
   document.body.classList.toggle("home", home);
   document.body.classList.toggle("case", !home);
   el("cases-nav").hidden = !home;
-  el("files-nav").hidden = home;
+  el("case-nav").hidden = home;
   el("agents").hidden = home;
   el("placeholder").hidden = !home;
   el("back-cases").hidden = home;

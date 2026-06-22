@@ -115,26 +115,30 @@ class AgentSession:
         capabilities = getattr(initialized, "agent_capabilities", None)
         self._supports_load = bool(getattr(capabilities, "load_session", False))
 
-    async def start(self, system_instructions: str) -> None:
-        """Spawn the agent, open a fresh session, and inject system instructions."""
+    async def start(self) -> None:
+        """Spawn the agent and open a fresh session, ready and idle.
+
+        No prompt is sent: casebook does not query the agent on start. The
+        directive is prepended to the user's first message by the coordinator, so
+        a brand-new session doesn't speak until the user does.
+        """
         await self._spawn()
         session = await self._conn.new_session(
             cwd=str(self.project_root), mcp_servers=[]
         )
         self._acp_session_id = session.session_id
         self._capture_models(session)
-        await self.send(system_instructions, system=True)
+        self._set_state("idle")
 
-    async def resume(
-        self, system_instructions: str, acp_session_id: Optional[str]
-    ) -> bool:
+    async def resume(self, acp_session_id: Optional[str]) -> bool:
         """Bring a stored session back to life. Returns True iff loaded natively.
 
         When the backend supports `session/load` and we have its ACP session id,
         the agent rehydrates its own history (the replayed updates are suppressed,
         since we already hold that transcript) — return True. Otherwise we open a
         fresh session and return False, leaving it to the caller to re-establish
-        context (casebook re-sends the saved transcript on the next message).
+        context (casebook re-sends the directive + saved transcript on the next
+        message). Either way, no prompt is sent here.
         """
         await self._spawn()
         if self._supports_load and acp_session_id:
@@ -156,7 +160,7 @@ class AgentSession:
         )
         self._acp_session_id = session.session_id
         self._capture_models(session)
-        await self.send(system_instructions, system=True)
+        self._set_state("idle")
         return False
 
     async def send(

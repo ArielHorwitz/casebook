@@ -208,7 +208,7 @@ class CaseCoordinator:
         self._persist_meta(agent_id)
         self._emit({"type": "agent_added", **self._agents[agent_id]})
         try:
-            await session.start(templates.system_instructions(case.case_id))
+            await session.start()
         except Exception as error:
             self.sessions.pop(agent_id)
             self._agents.pop(agent_id, None)
@@ -223,6 +223,9 @@ class CaseCoordinator:
             raise
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
+        # The directive is prepended to the first user message rather than sent as
+        # its own turn, so a new session doesn't query the agent until the user does.
+        self._pending_context[agent_id] = templates.system_instructions(case.case_id)
         self._persist_meta(agent_id)
         return agent_id
 
@@ -256,10 +259,7 @@ class CaseCoordinator:
         self._watch_case(case)
         self._emit({"type": "agent_updated", **agent})
         try:
-            loaded = await session.resume(
-                templates.system_instructions(agent["case_id"]),
-                self._acp_ids.get(agent_id),
-            )
+            loaded = await session.resume(self._acp_ids.get(agent_id))
         except Exception as error:
             self.sessions.pop(agent_id)
             agent["state"] = "stored"
@@ -273,15 +273,17 @@ class CaseCoordinator:
         await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
         if not loaded:
-            # No native session/load: re-send the saved transcript as context on
-            # the next message, and tell the user the continuity is imperfect.
-            self._pending_context[agent_id] = self._context_prompt(agent_id)
+            # No native session/load: re-send the directive + saved transcript as
+            # context on the next message, and say the continuity is imperfect.
+            self._pending_context[agent_id] = (
+                f"{templates.system_instructions(agent['case_id'])}\n\n"
+                f"{self._context_prompt(agent_id)}"
+            )
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "message": "Context re-sent from saved transcript "
                                    "imperfectly — this backend has no native "
-                                   "session loading, so the agent receives the "
-                                   "prior conversation with your next message."})
+                                   "session loading."})
 
     def _context_prompt(self, agent_id: str) -> str:
         """Frame the saved transcript as context for a non-natively-resumed session."""

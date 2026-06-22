@@ -39,7 +39,19 @@
           <div id="agent-panes"></div>
           <p id="no-open-sessions" hidden>No open sessions — add one with + or open a closed session from the sidebar.</p>
         </section>
-        <p id="placeholder">Select a case to open it on its own page.</p>
+        <section id="case-detail" hidden>
+          <h1 id="cd-title"></h1>
+          <div id="cd-meta" class="muted"></div>
+          <div id="cd-keywords"></div>
+          <div id="cd-files"></div>
+          <div id="cd-sessions"></div>
+          <div id="cd-id" class="muted"></div>
+          <div class="cd-actions">
+            <a id="cd-open" href="#">Open case →</a>
+            <button id="cd-delete">Delete case</button>
+          </div>
+        </section>
+        <p id="placeholder">Focus a case in the sidebar to see its details.</p>
       </main>
     </div>
 

@@ -21,6 +21,7 @@ const state = {
   panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
   focusedAgent: null, // agent_id of the keyboard-focused session pane
   focusedCase: null, // case_id of the keyboard-focused case (home page)
+  cases: [], // case summaries shown on the home page
   hotkeyByKey: new Map(), // KeyboardEvent.key -> action name
   widths: [], // configured session-column widths the resize hotkey cycles
   widthIndex: -1,
@@ -523,6 +524,11 @@ function focusCase(caseId) {
   for (const li of document.querySelectorAll("#case-list li")) {
     li.classList.toggle("focused", li.dataset.caseId === caseId);
   }
+  if (caseId) renderCaseDetail(caseId);
+  else {
+    el("case-detail").hidden = true;
+    el("placeholder").hidden = false;
+  }
 }
 
 function focusCaseStep(delta) {
@@ -615,6 +621,7 @@ function runAction(action) {
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
     case "cycle_width": return cycleWidth();
+    case "cancel_turn": return cancelTurn();
     case "help": return toggleHelp();
   }
   if (route.mode !== "case" || !agent) return; // session actions need a focused session
@@ -625,8 +632,19 @@ function runAction(action) {
     case "close_session": if (agent.live) send({ action: "close_agent", agent_id: id }); return;
     case "delete_session": return sessionDelete(id);
     case "toggle_allow": return sessionToggleAllow(id);
-    case "cancel_turn": return send({ action: "cancel", agent_id: id });
   }
+}
+
+// Stop a running turn — the focused session if it's working, otherwise whatever
+// is running (so a long tool call can be stopped even if focus has moved).
+function cancelTurn() {
+  if (route.mode !== "case") return;
+  const working = [...state.agents.values()]
+    .filter((a) => a.live && (a.state === "working" || a.state === "starting"))
+    .map((a) => a.agent_id);
+  if (working.length === 0) return;
+  const targets = working.includes(state.focusedAgent) ? [state.focusedAgent] : working;
+  for (const id of targets) send({ action: "cancel", agent_id: id });
 }
 
 function isTyping() {
@@ -696,39 +714,69 @@ function cycleWidth() {
 }
 
 // --- cases (home page) ----------------------------------------------------
+// The sidebar is a compact title-only list; focusing a case shows its details in
+// the main view.
 async function loadCases() {
-  const cases = await fetch("/api/cases").then((r) => r.json());
+  state.cases = await fetch("/api/cases").then((r) => r.json());
   const list = el("case-list");
   list.replaceChildren();
-  for (const c of cases) {
+  for (const c of state.cases) {
     const li = document.createElement("li");
     li.dataset.caseId = c.case_id;
     li.className = "case-item";
-    // A real link, so middle-/ctrl-click opens the case in a new browser tab.
+    // A real link, so middle-/ctrl-click opens the case in a new browser tab; a
+    // plain click just focuses it (details show in the main view).
     const link = document.createElement("a");
     link.className = "open";
     link.href = caseUrl(c.case_id);
-    const sessions = c.sessions ? `${c.sessions} session${c.sessions === 1 ? "" : "s"}` : "no sessions";
-    const created = c.created ? new Date(c.created).toLocaleDateString() : "";
-    const keywords = (c.keywords || []).map((k) => `<span class="kw">${k}</span>`).join("");
-    link.innerHTML =
-      `<div class="case-title-row">${c.title}</div>` +
-      `<div class="case-status">${c.status} · ${sessions}${created ? " · " + created : ""}</div>` +
-      (keywords ? `<div class="case-keywords">${keywords}</div>` : "") +
-      `<div class="case-id">${c.case_id}</div>`;
-    const trash = document.createElement("button");
-    trash.className = "trash";
-    trash.title = "delete case and all its sessions";
-    trash.textContent = "🗑";
-    trash.onclick = (e) => { e.preventDefault(); deleteCase(c.case_id, c.title); };
+    link.title = c.title;
+    link.textContent = c.title;
+    link.onclick = (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return; // let the browser open a tab
+      e.preventDefault();
+      focusCase(c.case_id);
+    };
     li.appendChild(link);
-    li.appendChild(trash);
-    li.addEventListener("mousedown", () => focusCase(c.case_id));
     list.appendChild(li);
   }
   const ids = caseIds();
   state.focusedCase = ids.includes(state.focusedCase) ? state.focusedCase : (ids[0] || null);
   focusCase(state.focusedCase);
+}
+
+let caseDetailToken = 0;
+async function renderCaseDetail(caseId) {
+  const summary = state.cases.find((c) => c.case_id === caseId);
+  if (!summary) {
+    el("case-detail").hidden = true;
+    el("placeholder").hidden = false;
+    return;
+  }
+  el("placeholder").hidden = true;
+  el("case-detail").hidden = false;
+  el("cd-title").textContent = summary.title;
+  el("cd-open").href = caseUrl(caseId);
+  el("cd-delete").onclick = () => deleteCase(caseId, summary.title);
+  el("cd-meta").textContent = [
+    summary.status,
+    `${summary.sessions || 0} session${summary.sessions === 1 ? "" : "s"}`,
+    summary.created ? new Date(summary.created).toLocaleString() : null,
+  ].filter(Boolean).join("  ·  ");
+  el("cd-id").textContent = caseId;
+  el("cd-keywords").innerHTML = (summary.keywords || []).map((k) => `<span class="kw">${k}</span>`).join("");
+  el("cd-files").innerHTML = "";
+  el("cd-sessions").innerHTML = "";
+  // Enrich with files + sessions (drop the result if focus moved on).
+  const token = ++caseDetailToken;
+  const detail = await fetch(`/api/cases/${encodeURIComponent(caseId)}`).then((r) => r.json()).catch(() => null);
+  if (token !== caseDetailToken || !detail) return;
+  if ((detail.files || []).length) {
+    el("cd-files").innerHTML = "<h4>Files</h4>" + detail.files.map((f) => `<span class="file">${f}</span>`).join("");
+  }
+  if ((detail.agents || []).length) {
+    el("cd-sessions").innerHTML = "<h4>Sessions</h4>" +
+      detail.agents.map((a) => `<div class="cd-session">${a.label} <span class="muted">(${a.live ? a.state : "closed"})</span></div>`).join("");
+  }
 }
 
 // --- case page ------------------------------------------------------------
@@ -785,6 +833,7 @@ function applyRoute() {
   el("cases-nav").hidden = !home;
   el("case-nav").hidden = home;
   el("agents").hidden = home;
+  el("case-detail").hidden = true; // shown on the home page when a case is focused
   el("placeholder").hidden = !home;
   el("back-cases").hidden = home;
   // The brand is the home heading; a case page leads with the back button + title.

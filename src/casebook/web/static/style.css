@@ -64,7 +64,7 @@ body {
 #layout { flex: 1; display: flex; min-height: 0; }
 
 #sidebar {
-  width: 240px;
+  width: 320px;
   border-right: 1px solid var(--border);
   background: var(--panel);
   overflow-y: auto;
@@ -90,25 +90,53 @@ body {
   font-size: 12px;
   padding: 2px 4px;
 }
+/* Compact, title-only case list; details show in the main view on focus. */
 #case-list { list-style: none; margin: 0; padding: 0; }
-.case-item { display: flex; align-items: flex-start; border-radius: 6px; }
+.case-item { border-radius: 6px; }
 .case-item:hover { background: var(--panel-2); }
-.case-item.focused { outline: 1px solid var(--accent); }
+.case-item.focused { background: var(--panel-2); outline: 1px solid var(--accent); }
 .case-item .open {
-  flex: 1; min-width: 0;
-  display: block; padding: 8px 10px; border-radius: 6px;
-  color: inherit; text-decoration: none; cursor: pointer;
+  display: block;
+  padding: 6px 10px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.case-item .case-title-row { font-weight: 600; }
-.case-item .case-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.case-item .case-id { font-size: 10px; color: var(--muted); opacity: 0.7; margin-top: 2px; }
-.case-item .case-keywords { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.case-item .kw {
-  font-size: 10px; padding: 0 5px; border-radius: 4px;
-  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+
+/* Keyword chip, shared by the case detail view. */
+.kw {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
 }
-.case-item .trash { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 6px; }
-.case-item .trash:hover { color: var(--text); }
+
+/* Focused-case detail panel (home page main view). */
+#case-detail { flex: 1; overflow: auto; padding: 24px 28px; }
+#cd-title { margin: 0 0 6px; font-size: 24px; }
+#case-detail .muted { color: var(--muted); font-size: 13px; }
+#cd-keywords { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+#cd-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
+#cd-files h4, #cd-sessions h4 { width: 100%; margin: 0 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+#cd-files .file { font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; }
+#cd-sessions { margin: 16px 0; }
+#cd-sessions .cd-session { font-size: 13px; padding: 2px 0; }
+#cd-id { margin-top: 16px; font-size: 11px; opacity: 0.7; }
+.cd-actions { display: flex; gap: 10px; margin-top: 22px; align-items: center; }
+#cd-open {
+  background: var(--accent); color: #11131a; text-decoration: none;
+  padding: 6px 14px; border-radius: 6px; font-weight: 600;
+}
+#cd-delete {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 14px; cursor: pointer;
+}
+#cd-delete:hover { border-color: #f7768e; color: #f7768e; }
 
 #workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #placeholder { color: var(--muted); margin: auto; }

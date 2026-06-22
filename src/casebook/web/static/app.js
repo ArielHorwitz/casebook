@@ -1,14 +1,25 @@
 "use strict";
 
+// --- routing ---------------------------------------------------------------
+// Each case is its own page (/case/<id>); the cases list is the home page (/).
+// Browser tabs do the multiplexing — there are no in-app tabs.
+function parseRoute() {
+  const match = location.pathname.match(/^\/case\/(.+)$/);
+  if (match) return { mode: "case", caseId: decodeURIComponent(match[1]) };
+  return { mode: "home", caseId: null };
+}
+const route = parseRoute();
+
 // --- state ----------------------------------------------------------------
 const state = {
   ws: null,
-  activeCase: null,
+  activeCase: route.caseId, // the case this page is scoped to (null on home)
   agents: new Map(), // agent_id -> {agent_id, case_id, label, backend, model, state, live}
   transcripts: new Map(), // agent_id -> [item]
   models: new Map(), // agent_id -> {available: [{model_id, name}], current}
   panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
   focusedAgent: null, // agent_id of the keyboard-focused session pane
+  focusedCase: null, // case_id of the keyboard-focused case (home page)
   hotkeyByKey: new Map(), // KeyboardEvent.key -> action name
 };
 
@@ -59,9 +70,15 @@ function setConnection(connected) {
 
 // --- event handling (single reducer for live + replayed events) -----------
 function handleEvent(event) {
+  if (event.type === "snapshot") return applySnapshot(event);
+  if (route.mode === "home") {
+    // The home page only tracks the case list; session events belong to pages.
+    if (event.type === "case_created") loadCases();
+    return;
+  }
+  // A case page ignores everything that isn't about its own case.
+  if (event.case_id && event.case_id !== route.caseId) return;
   switch (event.type) {
-    case "snapshot":
-      return applySnapshot(event);
     case "agent_added":
     case "agent_updated":
       return upsertAgent(event);
@@ -70,8 +87,6 @@ function handleEvent(event) {
     case "models":
       state.models.set(event.agent_id, { available: event.available || [], current: event.current });
       return renderModel(event.agent_id);
-    case "case_created":
-      return loadCases();
     case "notice":
       // Notices tied to a live session go in its transcript; orphans (failed
       // starts, case-level messages) would otherwise vanish — surface as a toast.
@@ -101,14 +116,19 @@ function applySnapshot(snapshot) {
   for (const [agentId, events] of Object.entries(snapshot.transcripts || {})) {
     for (const event of events) applyToTranscript(event);
   }
+  const ids = visiblePaneIds();
+  if (!ids.includes(state.focusedAgent)) state.focusedAgent = ids[0] || null;
+  applyPaneVisibility();
 }
 
 // Handles both agent_added and agent_updated (e.g. live <-> stored transitions).
 function upsertAgent(agent) {
+  if (route.mode !== "case" || agent.case_id !== route.caseId) return;
   state.agents.set(agent.agent_id, agent);
   if (!state.transcripts.has(agent.agent_id)) state.transcripts.set(agent.agent_id, []);
   buildPane(agent);
   updateHead(agent.agent_id);
+  if (!state.focusedAgent) focusPane(agent.agent_id);
 }
 
 function removeAgent(agentId) {
@@ -343,24 +363,16 @@ function renderItem(agentId, item) {
   return document.createElement("div");
 }
 
+// On a case page, every pane belongs to this case; just track the focus marker.
 function applyPaneVisibility() {
   for (const [agentId, pane] of state.panes) {
-    const agent = state.agents.get(agentId);
-    pane.root.hidden = !agent || agent.case_id !== state.activeCase;
     pane.root.classList.toggle("focused", agentId === state.focusedAgent);
   }
-  const hasCase = state.activeCase !== null;
-  el("add-agent").hidden = !hasCase;
-  el("placeholder").hidden = hasCase;
-  el("case-meta").hidden = !hasCase;
 }
 
 // --- keyboard focus + shortcuts -------------------------------------------
 function visiblePaneIds() {
-  return [...state.panes.keys()].filter((id) => {
-    const agent = state.agents.get(id);
-    return agent && agent.case_id === state.activeCase;
-  });
+  return [...state.panes.keys()];
 }
 
 function focusPane(agentId) {
@@ -369,7 +381,10 @@ function focusPane(agentId) {
   for (const [id, pane] of state.panes) pane.root.classList.toggle("focused", id === agentId);
 }
 
+// Focus moves between session panes on a case page, or between cases on home —
+// the same hotkeys, scoped to whatever the page shows.
 function focusStep(delta) {
+  if (route.mode === "home") return focusCaseStep(delta);
   const ids = visiblePaneIds();
   if (ids.length === 0) return;
   const current = ids.indexOf(state.focusedAgent);
@@ -377,6 +392,27 @@ function focusStep(delta) {
   focusPane(ids[next]);
   const pane = state.panes.get(ids[next]);
   if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+
+function caseIds() {
+  return [...document.querySelectorAll("#case-list li")].map((li) => li.dataset.caseId);
+}
+
+function focusCase(caseId) {
+  state.focusedCase = caseId;
+  for (const li of document.querySelectorAll("#case-list li")) {
+    li.classList.toggle("focused", li.dataset.caseId === caseId);
+  }
+}
+
+function focusCaseStep(delta) {
+  const ids = caseIds();
+  if (ids.length === 0) return;
+  const current = ids.indexOf(state.focusedCase);
+  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
+  focusCase(ids[next]);
+  const li = document.querySelector(`#case-list li[data-case-id="${CSS.escape(ids[next])}"]`);
+  if (li) li.scrollIntoView({ block: "nearest" });
 }
 
 // Session actions shared by buttons and hotkeys.
@@ -408,8 +444,15 @@ async function newCase() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: title.trim() || "Unnamed case" }),
   }).then((r) => r.json());
-  await loadCases();
-  openCase(summary.case_id);
+  caseUrl(summary.case_id) && (location.href = caseUrl(summary.case_id));
+}
+
+function caseUrl(caseId) {
+  return `/case/${encodeURIComponent(caseId)}`;
+}
+
+function openFocusedCase() {
+  if (state.focusedCase) location.href = caseUrl(state.focusedCase);
 }
 
 function runAction(action) {
@@ -420,9 +463,10 @@ function runAction(action) {
     case "new_session": return newSession();
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
+    case "open_focused": return route.mode === "home" ? openFocusedCase() : undefined;
     case "help": return toggleHelp();
   }
-  if (!agent) return; // session-targeted actions need a focused pane
+  if (route.mode !== "case" || !agent) return; // session actions need a focused pane
   switch (action) {
     case "rename_session": return sessionRename(id);
     case "name_session": return send({ action: "name_agent", agent_id: id });
@@ -464,7 +508,7 @@ function toggleHelp() {
   el("hotkey-help").hidden = !el("hotkey-help").hidden;
 }
 
-// --- cases ----------------------------------------------------------------
+// --- cases (home page) ----------------------------------------------------
 async function loadCases() {
   const cases = await fetch("/api/cases").then((r) => r.json());
   const list = el("case-list");
@@ -472,23 +516,25 @@ async function loadCases() {
   for (const c of cases) {
     const li = document.createElement("li");
     li.dataset.caseId = c.case_id;
-    li.innerHTML = `<div>${c.title}</div><div class="case-status">${c.status} · ${c.case_id}</div>`;
-    li.onclick = () => openCase(c.case_id);
+    // A real link, so middle-/ctrl-click opens the case in a new browser tab.
+    const link = document.createElement("a");
+    link.href = caseUrl(c.case_id);
+    link.innerHTML = `<div>${c.title}</div><div class="case-status">${c.status} · ${c.case_id}</div>`;
+    li.appendChild(link);
+    li.addEventListener("mousedown", () => focusCase(c.case_id));
     list.appendChild(li);
   }
+  const ids = caseIds();
+  state.focusedCase = ids.includes(state.focusedCase) ? state.focusedCase : (ids[0] || null);
+  focusCase(state.focusedCase);
 }
 
-async function openCase(caseId) {
-  state.activeCase = caseId;
-  for (const li of document.querySelectorAll("#case-list li")) {
-    li.classList.toggle("active", li.dataset.caseId === caseId);
-  }
-  const detail = await fetch(`/api/cases/${caseId}`).then((r) => r.json());
-  el("case-title").textContent = detail.title || caseId;
-  renderFiles(detail.files || []);
-  const ids = visiblePaneIds();
-  state.focusedAgent = ids.includes(state.focusedAgent) ? state.focusedAgent : (ids[0] || null);
-  applyPaneVisibility();
+// --- case page ------------------------------------------------------------
+async function openCaseView(caseId) {
+  const detail = await fetch(`/api/cases/${caseId}`).then((r) => r.json()).catch(() => null);
+  el("case-title").textContent = (detail && detail.title) || caseId;
+  document.title = `${(detail && detail.title) || caseId} — casebook`;
+  renderFiles((detail && detail.files) || []);
 }
 
 function renderFiles(files) {
@@ -523,6 +569,17 @@ async function loadBackends() {
   select.hidden = info.backends.length <= 1;
 }
 
+function applyRoute() {
+  const home = route.mode === "home";
+  document.body.classList.toggle("home", home);
+  document.body.classList.toggle("case", !home);
+  el("cases-nav").hidden = !home;
+  el("files-nav").hidden = home;
+  el("agents").hidden = home;
+  el("placeholder").hidden = !home;
+  el("back-cases").hidden = home;
+}
+
 // --- wiring ---------------------------------------------------------------
 el("add-agent").onclick = newSession;
 el("new-case").onclick = newCase;
@@ -534,7 +591,12 @@ el("hotkey-help-close").onclick = toggleHelp;
 el("hotkey-hint").onclick = toggleHelp;
 document.addEventListener("keydown", onKeydown);
 
-loadCases();
-loadBackends();
+applyRoute();
 loadHotkeys();
 connect();
+if (route.mode === "home") {
+  loadCases();
+} else {
+  loadBackends();
+  openCaseView(route.caseId);
+}

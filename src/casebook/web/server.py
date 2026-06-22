@@ -45,6 +45,8 @@ def create_app(project_root: Path) -> Starlette:
         return coordinator["instance"]
 
     async def index(_request: Request) -> FileResponse:
+        # The same document backs the cases home (/) and each case page
+        # (/case/{id}); the client routes on location.pathname.
         return FileResponse(STATIC_DIR.joinpath("index.html"))
 
     async def cases_endpoint(request: Request) -> JSONResponse:
@@ -83,6 +85,7 @@ def create_app(project_root: Path) -> Starlette:
         lifespan=lifespan,
         routes=[
             Route("/", index),
+            Route("/case/{case_id}", index),
             Route("/api/cases", cases_endpoint, methods=["GET", "POST"]),
             Route("/api/backends", list_backends),
             Route("/api/hotkeys", hotkeys),

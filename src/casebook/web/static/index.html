@@ -8,33 +8,36 @@
   </head>
   <body>
     <header id="topbar">
-      <span class="brand">casebook</span>
+      <a class="brand" href="/">casebook</a>
+      <a id="back-cases" href="/" hidden>← Cases</a>
       <span id="case-title"></span>
       <button id="hotkey-hint" title="keyboard shortcuts">⌨</button>
       <span id="connection" class="disconnected">connecting…</span>
     </header>
     <div id="layout">
       <aside id="sidebar">
-        <div class="sidebar-head">
-          <h2>Cases</h2>
-          <button id="new-case" title="new case">+ case</button>
+        <div id="cases-nav">
+          <div class="sidebar-head">
+            <h2>Cases</h2>
+            <button id="new-case" title="new case">+ case</button>
+          </div>
+          <ul id="case-list"></ul>
         </div>
-        <ul id="case-list"></ul>
+        <div id="files-nav" hidden>
+          <div class="sidebar-head"><h2>Files</h2></div>
+          <ul id="file-list"></ul>
+        </div>
       </aside>
       <main id="workspace">
-        <section id="agents">
+        <section id="agents" hidden>
           <div id="session-bar">
             <h3>Sessions</h3>
             <select id="backend-select" title="backend for new sessions" hidden></select>
-            <button id="add-agent" hidden>+ session</button>
+            <button id="add-agent">+ session</button>
           </div>
           <div id="agent-panes"></div>
         </section>
-        <details id="case-meta" hidden>
-          <summary>Files</summary>
-          <ul id="file-list"></ul>
-        </details>
-        <p id="placeholder">Select a case to begin.</p>
+        <p id="placeholder">Select a case to open it on its own page.</p>
       </main>
     </div>
 

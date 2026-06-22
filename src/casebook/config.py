@@ -57,6 +57,7 @@ DEFAULT_HOTKEYS = {
     "new_session": "n",
     "focus_next": "]",
     "focus_prev": "[",
+    "open_focused": "Enter",
     "rename_session": "r",
     "name_session": "g",
     "resume_session": "e",

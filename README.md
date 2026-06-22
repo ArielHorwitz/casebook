@@ -64,18 +64,27 @@ casebook serve                # launch the coordinator app (browser UI)
 
 ## App
 
-The app opens on your cases. Create a case (+ case), pick one, and start one or
-more sessions on it (+ session) — choosing the backend and, once running, the
-model. Each session is its own ACP session, bootstrapped into the case with the
-casebook directive inlined as its system instructions — no copy-paste. Sessions
-are persisted and resumable: close one to stop it but keep its history, resume it
-later, or delete it. Sessions working the same case coordinate through the
-filesystem, not through each other. Edit files in your own editor; the app
-watches the case directory and the agents read fresh on their next turn.
+The app's home page (`/`) lists your cases. Each case opens on its **own page**
+(`/case/<id>`), so you can keep several cases open in separate browser tabs
+alongside the home page — there are no in-app tabs. A case page shows that case's
+files in the sidebar and its sessions as side-by-side panes.
 
-Keyboard shortcuts drive the common actions (new case/session, focus between
-sessions, rename/name/resume/close/delete, toggle always-allow, cancel) — press
-`?` or click the ⌨ button to see the bindings; customize them under `[hotkeys]`.
+Create a case (+ case), open it, and start one or more sessions on it
+(+ session) — choosing the backend and, once running, the model. Each session is
+its own ACP session, bootstrapped into the case with the casebook directive
+inlined as its system instructions — no copy-paste. Sessions are persisted and
+resumable: close one to stop it but keep its history, resume it later, or delete
+it. (When a backend has no native ACP session loading, resume re-sends the saved
+transcript as context on your next message and says so.) Sessions working the
+same case coordinate through the filesystem, not through each other. Edit files
+in your own editor; the app watches the case directory and the agents read fresh
+on their next turn.
+
+Keyboard shortcuts drive the common actions — `focus next/prev` move between
+cases on the home page and between sessions on a case page (same keys), plus
+new case/session, open focused, rename/name/resume/close/delete, toggle
+always-allow, and cancel. Press `?` or click the ⌨ button to see the bindings;
+customize them under `[hotkeys]`.
 
 ### Model selection
 

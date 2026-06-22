@@ -36,7 +36,19 @@ function connect() {
 function send(action) {
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify(action));
+  } else {
+    toast("Not connected — action ignored. Retrying the connection…");
   }
+}
+
+// --- toasts (transient feedback for things with no home in a transcript) ---
+function toast(message, kind = "info") {
+  const node = document.createElement("div");
+  node.className = `toast ${kind}`;
+  node.textContent = message;
+  node.onclick = () => node.remove();
+  el("toasts").appendChild(node);
+  setTimeout(() => node.remove(), 6000);
 }
 
 function setConnection(connected) {
@@ -60,6 +72,13 @@ function handleEvent(event) {
       return renderModel(event.agent_id);
     case "case_created":
       return loadCases();
+    case "notice":
+      // Notices tied to a live session go in its transcript; orphans (failed
+      // starts, case-level messages) would otherwise vanish — surface as a toast.
+      if (event.agent_id && state.transcripts.has(event.agent_id)) {
+        return applyToTranscript(event);
+      }
+      return toast(event.message);
     case "files_changed":
       if (event.case_id === state.activeCase) renderFiles(event.files);
       return;

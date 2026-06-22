@@ -73,6 +73,9 @@ class CaseCoordinator:
         self._acp_ids: dict[str, Optional[str]] = {}
         self._created: dict[str, Optional[str]] = {}
         self._models: dict[str, list[dict]] = {}
+        # Transcript to prepend to a resumed session's next message, for backends
+        # that lack native session/load. Keyed by agent_id, consumed once.
+        self._pending_context: dict[str, str] = {}
         self._permissions: dict[str, asyncio.Future] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
@@ -253,7 +256,7 @@ class CaseCoordinator:
         self._watch_case(case)
         self._emit({"type": "agent_updated", **agent})
         try:
-            await session.resume(
+            loaded = await session.resume(
                 templates.system_instructions(agent["case_id"]),
                 self._acp_ids.get(agent_id),
             )
@@ -269,6 +272,28 @@ class CaseCoordinator:
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
+        if not loaded:
+            # No native session/load: re-send the saved transcript as context on
+            # the next message, and tell the user the continuity is imperfect.
+            self._pending_context[agent_id] = self._context_prompt(agent_id)
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": "Context re-sent from saved transcript "
+                                   "imperfectly — this backend has no native "
+                                   "session loading, so the agent receives the "
+                                   "prior conversation with your next message."})
+
+    def _context_prompt(self, agent_id: str) -> str:
+        """Frame the saved transcript as context for a non-natively-resumed session."""
+        body = self._transcript_text(agent_id, limit=24000)
+        return (
+            "You are resuming a previous session that was interrupted. This backend "
+            "cannot restore it natively, so below is a transcript of the prior "
+            "conversation, for context. Tool calls and file edits from before are "
+            "not included — re-read files as needed. Continue from where this left "
+            "off.\n\n=== prior conversation ===\n"
+            f"{body}\n=== end of prior conversation ==="
+        )
 
     async def _apply_models(self, agent_id: str, session: AgentSession) -> None:
         """Apply the configured default-model preference and publish the model list."""
@@ -371,7 +396,16 @@ class CaseCoordinator:
         session = self.sessions.get(agent_id)
         if session is None:
             raise cases.CasebookError(f"no such live session: {agent_id}")
-        await session.send(text)
+        pending = self._pending_context.pop(agent_id, None)
+        if pending:
+            # Attach the re-sent transcript to the agent's turn, but show only the
+            # user's own message in the transcript (the history is already visible).
+            await session.send(
+                f"{pending}\n\n=== the user's message follows ===\n{text}",
+                display_text=text,
+            )
+        else:
+            await session.send(text)
 
     async def cancel(self, agent_id: str) -> None:
         session = self.sessions.get(agent_id)
@@ -388,6 +422,7 @@ class CaseCoordinator:
             agent["state"] = "stored"
             agent["live"] = False
             self._models.pop(agent_id, None)
+            self._pending_context.pop(agent_id, None)
             self._persist_meta(agent_id)
             self._emit({"type": "agent_updated", **agent})
 
@@ -399,6 +434,7 @@ class CaseCoordinator:
         self._acp_ids.pop(agent_id, None)
         self._created.pop(agent_id, None)
         self._models.pop(agent_id, None)
+        self._pending_context.pop(agent_id, None)
         if session is not None:
             await session.stop()
         if agent is not None:

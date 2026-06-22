@@ -127,14 +127,14 @@ class AgentSession:
 
     async def resume(
         self, system_instructions: str, acp_session_id: Optional[str]
-    ) -> None:
-        """Bring a stored session back to life.
+    ) -> bool:
+        """Bring a stored session back to life. Returns True iff loaded natively.
 
         When the backend supports `session/load` and we have its ACP session id,
         the agent rehydrates its own history (the replayed updates are suppressed,
-        since we already hold that transcript). Otherwise we open a fresh session —
-        the visible history is preserved but the agent does not remember it — and
-        say so.
+        since we already hold that transcript) — return True. Otherwise we open a
+        fresh session and return False, leaving it to the caller to re-establish
+        context (casebook re-sends the saved transcript on the next message).
         """
         await self._spawn()
         if self._supports_load and acp_session_id:
@@ -150,21 +150,24 @@ class AgentSession:
                 self._suppress_emit = False
             self._capture_models(loaded)
             self._set_state("idle")
-        else:
-            session = await self._conn.new_session(
-                cwd=str(self.project_root), mcp_servers=[]
-            )
-            self._acp_session_id = session.session_id
-            self._capture_models(session)
-            self._notify(
-                "previous agent context could not be restored (backend does not "
-                "support session loading); the visible history is preserved but "
-                "the agent does not remember it"
-            )
-            await self.send(system_instructions, system=True)
+            return True
+        session = await self._conn.new_session(
+            cwd=str(self.project_root), mcp_servers=[]
+        )
+        self._acp_session_id = session.session_id
+        self._capture_models(session)
+        await self.send(system_instructions, system=True)
+        return False
 
-    async def send(self, text: str, *, system: bool = False) -> None:
-        """Run one prompt turn. Rejected (with a notice) while a turn is active."""
+    async def send(
+        self, text: str, *, system: bool = False, display_text: Optional[str] = None
+    ) -> None:
+        """Run one prompt turn. Rejected (with a notice) while a turn is active.
+
+        `display_text` (when given) is what the UI shows for the user turn, while
+        `text` is what the agent actually receives — used to attach hidden context
+        (e.g. a re-sent transcript) without dumping it into the visible transcript.
+        """
         if self._busy:
             self._notify("agent is still responding; wait for the current turn")
             return
@@ -175,7 +178,7 @@ class AgentSession:
                 "case_id": self.case_id,
                 "type": "message",
                 "role": "user",
-                "text": text,
+                "text": display_text if display_text is not None else text,
                 "system": system,
             }
         )

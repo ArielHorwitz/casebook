@@ -67,6 +67,7 @@ DEFAULT_HOTKEYS = {
     "delete_session": "d",
     "toggle_allow": "a",
     "cancel_turn": "s",
+    "cycle_width": "w",
     "help": "?",
 }
 
@@ -77,6 +78,8 @@ DEFAULT_UI = {
     "session_width": "50%",
     "session_min_width": "320px",
     "session_max_width": "none",
+    # Widths the resize hotkey cycles through (any CSS lengths).
+    "session_widths": ["20%", "33%", "50%", "66%", "75%", "100%"],
 }
 
 

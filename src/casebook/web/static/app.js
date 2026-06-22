@@ -22,6 +22,8 @@ const state = {
   focusedAgent: null, // agent_id of the keyboard-focused session pane
   focusedCase: null, // case_id of the keyboard-focused case (home page)
   hotkeyByKey: new Map(), // KeyboardEvent.key -> action name
+  widths: [], // configured session-column widths the resize hotkey cycles
+  widthIndex: -1,
 };
 
 const el = (id) => document.getElementById(id);
@@ -612,6 +614,7 @@ function runAction(action) {
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
+    case "cycle_width": return cycleWidth();
     case "help": return toggleHelp();
   }
   if (route.mode !== "case" || !agent) return; // session actions need a focused session
@@ -672,9 +675,24 @@ function toggleHelp() {
 async function loadUi() {
   const ui = await fetch("/api/ui").then((r) => r.json());
   const style = document.documentElement.style;
-  if (ui.session_width) style.setProperty("--session-width", ui.session_width);
   if (ui.session_min_width) style.setProperty("--session-min-width", ui.session_min_width);
   if (ui.session_max_width) style.setProperty("--session-max-width", ui.session_max_width);
+  state.widths = Array.isArray(ui.session_widths) ? ui.session_widths : [];
+  // A previously chosen width (this browser) wins over the configured default.
+  const saved = localStorage.getItem("casebook.sessionWidth");
+  const width = saved || ui.session_width;
+  if (width) style.setProperty("--session-width", width);
+  state.widthIndex = state.widths.indexOf(width);
+}
+
+// Cycle the session-column width through the configured list (resize hotkey).
+function cycleWidth() {
+  if (!state.widths || state.widths.length === 0) return;
+  state.widthIndex = (state.widthIndex + 1 + state.widths.length) % state.widths.length;
+  const width = state.widths[state.widthIndex];
+  document.documentElement.style.setProperty("--session-width", width);
+  localStorage.setItem("casebook.sessionWidth", width);
+  toast(`Session width: ${width}`);
 }
 
 // --- cases (home page) ----------------------------------------------------

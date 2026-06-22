@@ -544,6 +544,7 @@ function runAction(action) {
   switch (action) {
     case "new_case": return newCase();
     case "new_session": return newSession();
+    case "home": return route.mode === "case" ? (location.href = "/") : undefined;
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
@@ -601,6 +602,15 @@ async function loadHotkeys() {
 
 function toggleHelp() {
   el("hotkey-help").hidden = !el("hotkey-help").hidden;
+}
+
+// Apply configurable session-column sizing as CSS variables.
+async function loadUi() {
+  const ui = await fetch("/api/ui").then((r) => r.json());
+  const style = document.documentElement.style;
+  if (ui.session_width) style.setProperty("--session-width", ui.session_width);
+  if (ui.session_min_width) style.setProperty("--session-min-width", ui.session_min_width);
+  if (ui.session_max_width) style.setProperty("--session-max-width", ui.session_max_width);
 }
 
 // --- cases (home page) ----------------------------------------------------
@@ -695,6 +705,7 @@ document.addEventListener("keydown", onKeydown);
 
 applyRoute();
 loadHotkeys();
+loadUi();
 connect();
 if (route.mode === "home") {
   loadCases();

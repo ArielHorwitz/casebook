@@ -56,6 +56,7 @@ DEFAULT_NAMING_PROMPT = (
 DEFAULT_HOTKEYS = {
     "new_case": "c",
     "new_session": "n",
+    "home": "h",
     "focus_next": ["]", "ArrowRight", "ArrowDown"],
     "focus_prev": ["[", "ArrowLeft", "ArrowUp"],
     "open_focused": "Enter",
@@ -67,6 +68,15 @@ DEFAULT_HOTKEYS = {
     "toggle_allow": "a",
     "cancel_turn": "s",
     "help": "?",
+}
+
+# UI sizing for the session columns (panes). Values are CSS lengths, so any unit
+# works — "33vw" / "30%" for a fraction of the screen, "px"/"em" for fixed sizes,
+# "none" for no maximum. Override under a `[ui]` table in config.toml.
+DEFAULT_UI = {
+    "session_width": "440px",
+    "session_min_width": "320px",
+    "session_max_width": "none",
 }
 
 
@@ -123,6 +133,7 @@ class Config:
     naming_model: Optional[str] = None
     # Action -> key, or a list of keys (the browser binds each to that action).
     hotkeys: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
+    ui: dict = field(default_factory=lambda: dict(DEFAULT_UI))
 
     def select_backend(self, name: Optional[str] = None) -> Backend:
         chosen = name or self.default_backend
@@ -184,4 +195,5 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         naming_backend=data.get("naming_backend"),
         naming_model=data.get("naming_model"),
         hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
+        ui={**DEFAULT_UI, **data.get("ui", {})},
     )

@@ -139,8 +139,10 @@ body {
 .agent-pane {
   display: flex;
   flex-direction: column;
-  width: 420px;
-  min-width: 320px;
+  flex: none;
+  width: var(--session-width, 440px);
+  min-width: var(--session-min-width, 320px);
+  max-width: var(--session-max-width, none);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;

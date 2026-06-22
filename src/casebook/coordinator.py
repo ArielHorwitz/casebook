@@ -171,6 +171,9 @@ class CaseCoordinator:
     def hotkeys(self) -> dict:
         return dict(self.config.hotkeys)
 
+    def ui_config(self) -> dict:
+        return dict(self.config.ui)
+
     def create_case(self, title: str) -> dict:
         """Create a case on disk and announce it so open browsers refresh."""
         case = cases.create_case(self.casebook_root, title or "Unnamed case")

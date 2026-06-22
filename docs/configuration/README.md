@@ -28,6 +28,7 @@ a backend without redefining the global ones).
 | `naming_model` | string | — | Model to use for naming (same loose match as `default_model`). |
 | `[backends.<name>]` | table | echo + claude (built-in) | Define a launchable ACP agent. Full detail: **[backends.md](backends.md)**. |
 | `[hotkeys]` | table | (built-in) | Rebind keyboard shortcuts. Full detail: **[hotkeys.md](hotkeys.md)**. |
+| `[ui]` | table | `440px`/`320px`/`none` | Session-column sizing — see [UI sizing](#ui-sizing). |
 
 ## A complete example
 
@@ -54,6 +55,28 @@ env = { GEMINI_API_KEY = "..." }
 new_session = "n"
 focus_next = ["]", "ArrowRight", "ArrowDown"]
 ```
+
+## UI sizing
+
+Each open session is a column (pane) in the case page's main area. Size them with
+a `[ui]` table — values are **CSS lengths**, so any unit works: `vw`/`%` for a
+fraction of the screen, `px`/`em`/`rem` for fixed sizes, `none` for no maximum.
+
+| Key | Default | What it does |
+|---|---|---|
+| `session_width` | `"440px"` | The basis width of each session column. |
+| `session_min_width` | `"320px"` | Never shrink a column below this. |
+| `session_max_width` | `"none"` | Never grow a column beyond this. |
+
+```toml
+[ui]
+session_width = "33vw"      # each column is a third of the viewport…
+session_min_width = "28em"  # …but at least this wide…
+session_max_width = "720px" # …and never wider than this.
+```
+
+Columns don't grow or shrink to fit; when they overflow the window the main area
+scrolls horizontally.
 
 ## See also
 

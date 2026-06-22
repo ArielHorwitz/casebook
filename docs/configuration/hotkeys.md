@@ -21,6 +21,7 @@ page (sessions).
 |---|---|---|---|
 | `new_case` | `c` | anywhere | Prompt for a title, create a case, open its page. |
 | `new_session` | `n` | case page | Start a new session (uses the sidebar's backend picker). |
+| `home` | `h` | case page | Go back to the cases home page. |
 | `focus_next` | `]` `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
 | `focus_prev` | `[` `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |
 | `open_focused` | `Enter` | home / case | Home: open the focused case. Case page: focus the open session's input box, or open (resume) the focused session if it's closed. |

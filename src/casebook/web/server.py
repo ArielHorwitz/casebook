@@ -66,8 +66,12 @@ def create_app(project_root: Path) -> Starlette:
         return JSONResponse(engine().ui_config())
 
     async def case_detail(request: Request) -> JSONResponse:
+        case_id = request.path_params["case_id"]
         try:
-            return JSONResponse(engine().case_detail(request.path_params["case_id"]))
+            if request.method == "DELETE":
+                await engine().delete_case(case_id)
+                return JSONResponse({"deleted": case_id})
+            return JSONResponse(engine().case_detail(case_id))
         except cases.CasebookError as error:
             return JSONResponse({"error": str(error)}, status_code=404)
 
@@ -93,7 +97,7 @@ def create_app(project_root: Path) -> Starlette:
             Route("/api/backends", list_backends),
             Route("/api/hotkeys", hotkeys),
             Route("/api/ui", ui_config),
-            Route("/api/cases/{case_id}", case_detail),
+            Route("/api/cases/{case_id}", case_detail, methods=["GET", "DELETE"]),
             Route("/api/cases/{case_id}/files/{filename}", case_file),
             WebSocketRoute("/ws", websocket_endpoint),
             Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"),

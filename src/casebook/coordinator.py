@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -213,6 +214,18 @@ class CaseCoordinator:
         self._emit({"type": "case_created", **summary})
         return summary
 
+    async def delete_case(self, case_id: str) -> None:
+        """Delete a case: stop and erase its sessions, then remove the directory."""
+        case = cases.resolve_case(self.casebook_root, case_id)
+        cid = case.case_id
+        for agent_id in [aid for aid, a in self._agents.items() if a["case_id"] == cid]:
+            await self.delete_agent(agent_id)
+        watcher = self._watchers.pop(cid, None)
+        if watcher is not None:
+            watcher[1].set()
+        shutil.rmtree(case.path)
+        self._emit({"type": "case_deleted", "case_id": cid})
+
     def case_detail(self, case_id: str) -> dict:
         case = cases.resolve_case(self.casebook_root, case_id)
         detail = self._case_summary(case)
@@ -229,13 +242,15 @@ class CaseCoordinator:
             raise cases.CasebookError("file is not in the case directory")
         return target.read_text()
 
-    @staticmethod
-    def _case_summary(case: cases.Case) -> dict:
+    def _case_summary(self, case: cases.Case) -> dict:
+        sessions = sum(1 for a in self._agents.values() if a["case_id"] == case.case_id)
         return {
             "case_id": case.case_id,
             "title": case.title,
             "status": case.status,
             "keywords": case.keywords,
+            "created": case.metadata.get("created"),
+            "sessions": sessions,
             "hidden": case.hidden,
         }
 

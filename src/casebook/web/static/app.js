@@ -74,7 +74,12 @@ function handleEvent(event) {
   if (event.type === "snapshot") return applySnapshot(event);
   if (route.mode === "home") {
     // The home page only tracks the case list; session events belong to pages.
-    if (event.type === "case_created") loadCases();
+    if (event.type === "case_created" || event.type === "case_deleted") loadCases();
+    return;
+  }
+  // A case page whose case was deleted (elsewhere) returns to the home page.
+  if (event.type === "case_deleted" && event.case_id === route.caseId) {
+    location.href = "/";
     return;
   }
   // A case page ignores everything that isn't about its own case.
@@ -564,6 +569,19 @@ function caseUrl(caseId) {
   return `/case/${encodeURIComponent(caseId)}`;
 }
 
+async function deleteCase(caseId, title) {
+  if (!caseId) return;
+  if (!confirm(`Delete case "${title || caseId}" and all its sessions? This cannot be undone.`)) return;
+  await fetch(`/api/cases/${encodeURIComponent(caseId)}`, { method: "DELETE" });
+  loadCases();
+}
+
+function deleteFocusedCase() {
+  const li = document.querySelector(`#case-list li[data-case-id="${CSS.escape(state.focusedCase || "")}"]`);
+  const title = li ? li.querySelector(".case-title-row").textContent : "";
+  deleteCase(state.focusedCase, title);
+}
+
 // Enter: open the focused case (home), or — on a case page — focus the open
 // session's composer, or open the focused session if it's closed.
 function openFocused() {
@@ -586,7 +604,10 @@ function runAction(action) {
   const agent = id && state.agents.get(id);
   switch (action) {
     case "new_case": return newCase();
-    case "new_session": return newSession();
+    // "new" and "delete" reuse the same keys on both pages: on home they act on
+    // cases, on a case page on sessions.
+    case "new_session": return route.mode === "case" ? newSession() : newCase();
+    case "delete_session": if (route.mode === "home") return deleteFocusedCase(); break;
     case "home": return route.mode === "case" ? (location.href = "/") : undefined;
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
@@ -664,11 +685,26 @@ async function loadCases() {
   for (const c of cases) {
     const li = document.createElement("li");
     li.dataset.caseId = c.case_id;
+    li.className = "case-item";
     // A real link, so middle-/ctrl-click opens the case in a new browser tab.
     const link = document.createElement("a");
+    link.className = "open";
     link.href = caseUrl(c.case_id);
-    link.innerHTML = `<div>${c.title}</div><div class="case-status">${c.status} · ${c.case_id}</div>`;
+    const sessions = c.sessions ? `${c.sessions} session${c.sessions === 1 ? "" : "s"}` : "no sessions";
+    const created = c.created ? new Date(c.created).toLocaleDateString() : "";
+    const keywords = (c.keywords || []).map((k) => `<span class="kw">${k}</span>`).join("");
+    link.innerHTML =
+      `<div class="case-title-row">${c.title}</div>` +
+      `<div class="case-status">${c.status} · ${sessions}${created ? " · " + created : ""}</div>` +
+      (keywords ? `<div class="case-keywords">${keywords}</div>` : "") +
+      `<div class="case-id">${c.case_id}</div>`;
+    const trash = document.createElement("button");
+    trash.className = "trash";
+    trash.title = "delete case and all its sessions";
+    trash.textContent = "🗑";
+    trash.onclick = (e) => { e.preventDefault(); deleteCase(c.case_id, c.title); };
     li.appendChild(link);
+    li.appendChild(trash);
     li.addEventListener("mousedown", () => focusCase(c.case_id));
     list.appendChild(li);
   }

@@ -37,6 +37,11 @@ Triage and prioritization of user feedback from the initial implementation
 > note that all sessions run server-side regardless of what's on screen) is
 > tracked in
 > [round7-trivial-sessions-usage-sizing.md](round7-trivial-sessions-usage-sizing.md).
+>
+> **Round-8 feedback** (keep persisted leftovers on load; 50% default columns;
+> surface ACP usage in the pane header; console prints session running/idle status)
+> is tracked in
+> [round8-usage-display-no-cleanup-columns-console.md](round8-usage-display-no-cleanup-columns-console.md).
 
 ## Feedback items
 

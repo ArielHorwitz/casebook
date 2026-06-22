@@ -787,6 +787,9 @@ function applyRoute() {
   el("agents").hidden = home;
   el("placeholder").hidden = !home;
   el("back-cases").hidden = home;
+  // The brand is the home heading; a case page leads with the back button + title.
+  document.querySelector(".brand").hidden = !home;
+  el("case-title").hidden = home;
 }
 
 // --- wiring ---------------------------------------------------------------

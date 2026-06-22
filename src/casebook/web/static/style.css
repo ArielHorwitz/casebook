@@ -33,10 +33,30 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.brand { font-weight: 700; color: var(--accent); letter-spacing: 0.04em; text-decoration: none; }
-#back-cases { color: var(--muted); text-decoration: none; font-size: 13px; }
-#back-cases:hover { color: var(--text); }
-#case-title { color: var(--muted); }
+.brand { font-weight: 700; font-size: 15px; color: var(--accent); letter-spacing: 0.04em; text-decoration: none; }
+#back-cases {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+#back-cases:hover { border-color: var(--accent); }
+#case-title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #connection { margin-left: auto; font-size: 12px; }
 #connection.connected { color: #9ece6a; }
 #connection.disconnected { color: #f7768e; }

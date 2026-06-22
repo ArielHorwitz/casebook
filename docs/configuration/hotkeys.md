@@ -32,7 +32,7 @@ page (sessions).
 | `close_session` | `x` | case page | Close the focused session if it's open (collapses it to the sidebar). |
 | `delete_session` | `d` | home / case | Case page: delete the focused session. Home page: delete the focused case and all its sessions. Both ask to confirm. |
 | `toggle_allow` | `a` | case page | Toggle "always allow" permissions on the focused session. |
-| `cancel_turn` | `s` | case page | Cancel the focused session's current turn. |
+| `cancel_turn` | `s` | case page | Stop a running turn — the focused session if it's working, otherwise any running session (e.g. to abort a long tool call). |
 | `help` | `?` | anywhere | Toggle the shortcuts overlay. |
 
 ### Always-on keys (not configurable)

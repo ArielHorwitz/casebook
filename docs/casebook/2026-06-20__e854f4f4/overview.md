@@ -47,6 +47,10 @@ Triage and prioritization of user feedback from the initial implementation
 > hotkeys; session-column resize hotkey cycling configured widths; top-bar
 > redesign) is tracked in
 > [round9-home-details-resize-topbar.md](round9-home-details-resize-topbar.md).
+>
+> **Round-10 feedback** (compact title-only home list with details in the main
+> view; wider sidebar; keyboard stop for a running turn) is tracked in
+> [round10-home-detail-view-stop-hotkey.md](round10-home-detail-view-stop-hotkey.md).
 
 ## Feedback items
 

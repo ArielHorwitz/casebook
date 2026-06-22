@@ -81,22 +81,24 @@ class CaseCoordinator:
         # "trivial" — identical to a brand-new one — and is never persisted.
         self._auto_named: dict[str, bool] = {}
         self._persisted: set[str] = set()
+        # Latest usage (context size/used, token totals, cost) per session, merged
+        # from ACP usage updates and prompt responses.
+        self._usage: dict[str, dict] = {}
+        # Which sessions are currently busy, for console activity reporting.
+        self._busy_ids: set[str] = set()
         self._permissions: dict[str, asyncio.Future] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
     def load_persisted(self) -> None:
         """Restore every session on disk as a (non-live) stored session.
 
-        Trivial leftovers (no messages and an auto name) are dropped — they're
-        identical to a brand-new session and resuming them is pointless.
+        Everything on disk is loaded as-is — startup never deletes sessions. (New
+        trivial sessions simply aren't written in the first place; see _emit.)
         """
         for stored in self.store.load_all():
             meta = stored.meta
             agent_id = meta["agent_id"]
             named = bool(meta.get("named", False))
-            if not stored.transcript and not named:
-                self.store.delete(meta["case_id"], agent_id)
-                continue
             self._agents[agent_id] = {
                 "agent_id": agent_id,
                 "case_id": meta["case_id"],
@@ -125,9 +127,15 @@ class CaseCoordinator:
     # --- single emit choke point: record, persist, then publish ----------
     def _emit(self, event: dict) -> None:
         agent_id = event.get("agent_id")
-        if event.get("type") == "agent_state" and agent_id in self._agents:
+        event_type = event.get("type")
+        if event_type == "agent_state" and agent_id in self._agents:
             self._agents[agent_id]["state"] = event.get("state")
-        if agent_id in self._agents and event.get("type") in _REPLAYABLE:
+        if event_type == "usage" and agent_id in self._agents:
+            merged = self._usage.setdefault(agent_id, {})
+            for key, value in event.items():
+                if key not in ("type", "agent_id", "case_id") and value is not None:
+                    merged[key] = value
+        if agent_id in self._agents and event_type in _REPLAYABLE:
             self._transcripts.setdefault(agent_id, []).append(event)
             # Only commit to disk once the session is non-trivial; the first real
             # content writes the metadata so meta.toml and the transcript stay paired.
@@ -135,6 +143,30 @@ class CaseCoordinator:
                 self._persist_meta(agent_id)
                 self.store.append_event(self._agents[agent_id]["case_id"], agent_id, event)
         self.bus.publish(event)
+        if event_type in ("agent_state", "agent_added", "agent_updated", "agent_removed"):
+            self._report_activity()
+
+    def _report_activity(self) -> None:
+        """Print a console line when the set of busy sessions changes.
+
+        Lets you glance at the terminal running `casebook serve` before Ctrl+C to
+        see whether any session is still working.
+        """
+        busy = {
+            agent_id
+            for agent_id, agent in self._agents.items()
+            if agent.get("live") and agent.get("state") in ("starting", "working")
+        }
+        if busy == self._busy_ids:
+            return
+        self._busy_ids = busy
+        if not busy:
+            print("[casebook] all sessions idle", flush=True)
+        else:
+            running = ", ".join(
+                f"{self._agents[a]['label']} ({self._agents[a]['state']})" for a in busy
+            )
+            print(f"[casebook] {len(busy)} session(s) running: {running}", flush=True)
 
     def _persist_meta(self, agent_id: str) -> None:
         if agent_id not in self._agents:
@@ -487,6 +519,7 @@ class CaseCoordinator:
         self._pending_context.pop(agent_id, None)
         self._auto_named.pop(agent_id, None)
         self._persisted.discard(agent_id)
+        self._usage.pop(agent_id, None)
         if session is not None:
             await session.stop()
         if agent is not None:
@@ -553,6 +586,7 @@ class CaseCoordinator:
             "agents": list(self._agents.values()),
             "transcripts": self._transcripts,
             "models": self._models,
+            "usage": self._usage,
         }
 
     async def shutdown(self) -> None:

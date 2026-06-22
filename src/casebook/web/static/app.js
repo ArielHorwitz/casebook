@@ -17,6 +17,7 @@ const state = {
   agents: new Map(), // agent_id -> {agent_id, case_id, label, backend, model, state, live}
   transcripts: new Map(), // agent_id -> [item]
   models: new Map(), // agent_id -> {available: [{model_id, name}], current}
+  usage: new Map(), // agent_id -> {used, size, total_tokens, cost_amount, cost_currency}
   panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
   focusedAgent: null, // agent_id of the keyboard-focused session pane
   focusedCase: null, // case_id of the keyboard-focused case (home page)
@@ -87,6 +88,14 @@ function handleEvent(event) {
     case "models":
       state.models.set(event.agent_id, { available: event.available || [], current: event.current });
       return renderModel(event.agent_id);
+    case "usage": {
+      const u = state.usage.get(event.agent_id) || {};
+      for (const k of ["used", "size", "input_tokens", "output_tokens", "total_tokens", "cost_amount", "cost_currency"]) {
+        if (event[k] != null) u[k] = event[k];
+      }
+      state.usage.set(event.agent_id, u);
+      return renderUsage(event.agent_id);
+    }
     case "notice":
       // Notices tied to a live session go in its transcript; orphans (failed
       // starts, case-level messages) would otherwise vanish — surface as a toast.
@@ -112,6 +121,10 @@ function applySnapshot(snapshot) {
   for (const [agentId, models] of Object.entries(snapshot.models || {})) {
     state.models.set(agentId, { available: models, current: (state.agents.get(agentId) || {}).model });
     renderModel(agentId);
+  }
+  for (const [agentId, usage] of Object.entries(snapshot.usage || {})) {
+    state.usage.set(agentId, usage);
+    renderUsage(agentId);
   }
   for (const [agentId, events] of Object.entries(snapshot.transcripts || {})) {
     for (const event of events) applyToTranscript(event);
@@ -153,6 +166,7 @@ function removeAgent(agentId) {
   state.agents.delete(agentId);
   state.transcripts.delete(agentId);
   state.models.delete(agentId);
+  state.usage.delete(agentId);
   if (state.focusedAgent === agentId) state.focusedAgent = sessionIds()[0] || null;
   renderSessionList();
   applyPaneVisibility();
@@ -220,6 +234,7 @@ function buildPane(agent) {
         <button class="close" title="close session (keep history)">×</button>
         <button class="delete" title="delete session and history">🗑</button>
       </div>
+      <div class="agent-usage"></div>
     </div>
     <div class="transcript"></div>
     <div class="composer">
@@ -267,6 +282,7 @@ function buildPane(agent) {
     resumeBtn: root.querySelector(".resume"),
     modelSelect,
     allowInput,
+    usageEl: root.querySelector(".agent-usage"),
     stateEl: root.querySelector(".state"),
     labelEl: root.querySelector(".label"),
   };
@@ -274,6 +290,33 @@ function buildPane(agent) {
   applyPaneVisibility();
   renderTranscript(agent.agent_id);
   renderModel(agent.agent_id);
+  renderUsage(agent.agent_id);
+}
+
+function fmtTokens(n) {
+  if (n == null) return null;
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return String(n);
+}
+
+function renderUsage(agentId) {
+  const pane = state.panes.get(agentId);
+  if (!pane) return;
+  const u = state.usage.get(agentId);
+  const parts = [];
+  if (u) {
+    if (u.used != null && u.size != null) {
+      const pct = u.size ? Math.round((u.used / u.size) * 100) : 0;
+      parts.push(`context ${fmtTokens(u.used)}/${fmtTokens(u.size)} (${pct}%)`);
+    } else if (u.used != null) {
+      parts.push(`context ${fmtTokens(u.used)}`);
+    }
+    if (u.total_tokens != null) parts.push(`${fmtTokens(u.total_tokens)} tokens`);
+    if (u.cost_amount != null) parts.push(`${u.cost_currency || ""} ${u.cost_amount.toFixed(2)}`.trim());
+  }
+  pane.usageEl.textContent = parts.join("  ·  ");
+  pane.usageEl.hidden = parts.length === 0;
 }
 
 function renderModel(agentId) {

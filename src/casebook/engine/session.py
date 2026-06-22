@@ -188,11 +188,12 @@ class AgentSession:
         )
         self._set_state("working")
         try:
-            await self._conn.prompt(
+            response = await self._conn.prompt(
                 prompt=[text_block(text)],
                 session_id=self._acp_session_id,
                 message_id=str(uuid.uuid4()),
             )
+            self._report_usage(getattr(response, "usage", None))
         except Exception as error:  # surface, don't crash the engine
             self._notify(f"agent error: {error}")
         finally:
@@ -205,6 +206,21 @@ class AgentSession:
 
     async def stop(self) -> None:
         await self._stack.aclose()
+
+    def _report_usage(self, usage: Any) -> None:
+        """Emit cumulative token totals from a prompt response, if the backend gives them."""
+        if usage is None:
+            return
+        self.emit(
+            {
+                "agent_id": self.agent_id,
+                "case_id": self.case_id,
+                "type": "usage",
+                "input_tokens": getattr(usage, "input_tokens", None),
+                "output_tokens": getattr(usage, "output_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
+        )
 
     def _set_state(self, state: str) -> None:
         self.emit(

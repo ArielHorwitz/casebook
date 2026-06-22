@@ -28,7 +28,7 @@ a backend without redefining the global ones).
 | `naming_model` | string | — | Model to use for naming (same loose match as `default_model`). |
 | `[backends.<name>]` | table | echo + claude (built-in) | Define a launchable ACP agent. Full detail: **[backends.md](backends.md)**. |
 | `[hotkeys]` | table | (built-in) | Rebind keyboard shortcuts. Full detail: **[hotkeys.md](hotkeys.md)**. |
-| `[ui]` | table | `440px`/`320px`/`none` | Session-column sizing — see [UI sizing](#ui-sizing). |
+| `[ui]` | table | `50%`/`320px`/`none` | Session-column sizing — see [UI sizing](#ui-sizing). |
 
 ## A complete example
 
@@ -64,7 +64,7 @@ fraction of the screen, `px`/`em`/`rem` for fixed sizes, `none` for no maximum.
 
 | Key | Default | What it does |
 |---|---|---|
-| `session_width` | `"440px"` | The basis width of each session column. |
+| `session_width` | `"50%"` | The basis width of each session column (default: two columns fill the width). |
 | `session_min_width` | `"320px"` | Never shrink a column below this. |
 | `session_max_width` | `"none"` | Never grow a column beyond this. |
 

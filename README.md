@@ -77,6 +77,13 @@ the same case coordinate through the filesystem, not through each other. Edit
 files in your own editor; the app watches the case directory and the agents read
 fresh on their next turn.
 
+Every session runs server-side independent of the browser — all sessions in all
+cases keep running regardless of which pages are open. The terminal running
+`casebook serve` prints when sessions start working and when they all go idle, so
+you can check before quitting. Each session pane shows context/token usage (and
+cost) when the backend reports it over ACP; session-column width is configurable
+(see [docs/configuration/](docs/configuration/README.md#ui-sizing)).
+
 The app is fully keyboard-drivable. `focus next/prev` move between cases on the
 home page and between sessions on a case page (same keys); **Enter** opens the
 focused case (home) or, on a case page, opens a closed session / focuses the open

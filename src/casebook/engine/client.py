@@ -70,7 +70,16 @@ class AgentClient(Client):
             )
         elif kind == "agent_plan":
             self._event(type="plan", raw=_dump(update))
-        # Other update kinds (modes, models, usage, commands) are ignored for now.
+        elif kind == "usage_update":
+            cost = getattr(update, "cost", None)
+            self._event(
+                type="usage",
+                used=getattr(update, "used", None),
+                size=getattr(update, "size", None),
+                cost_amount=getattr(cost, "amount", None) if cost else None,
+                cost_currency=getattr(cost, "currency", None) if cost else None,
+            )
+        # Other update kinds (modes, models, commands) are ignored for now.
 
     # --- agent → user: permission prompts ---------------------------------
     async def request_permission(

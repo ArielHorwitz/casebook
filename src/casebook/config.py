@@ -74,7 +74,7 @@ DEFAULT_HOTKEYS = {
 # works — "33vw" / "30%" for a fraction of the screen, "px"/"em" for fixed sizes,
 # "none" for no maximum. Override under a `[ui]` table in config.toml.
 DEFAULT_UI = {
-    "session_width": "440px",
+    "session_width": "50%",
     "session_min_width": "320px",
     "session_max_width": "none",
 }

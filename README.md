@@ -19,37 +19,30 @@ npm install -g @zed-industries/claude-code-acp   # optional
 ```
 
 Casebook ships a built-in `echo` backend (an in-tree ACP agent that reflects
-messages back), so the app always runs even with no model installed. Configure
-additional backends in `~/.config/casebook/config.toml` (respecting
-`$XDG_CONFIG_HOME`), optionally overridden per-project in `.casebook/config.toml`:
+messages back), so the app always runs even with no model installed.
+
+## Configuration
+
+Casebook reads a single optional TOML file at
+`~/.config/casebook/config.toml` (respecting `$XDG_CONFIG_HOME`), optionally
+overridden per-project in `.casebook/config.toml`. It configures backends, the
+default model, session naming, and keyboard shortcuts:
 
 ```toml
 default = "claude"
 
-# Instructions used by the "name session" button (optional; shown is the default).
-naming_prompt = "Reply with a concise title of at most six words for this session."
-
-# Which backend/model the "name session" button uses (optional). Defaults to the
-# session's own backend. The built-in `echo` backend is never used for naming.
-naming_backend = "claude"
-naming_model = "sonnet"
-
-# Preferred model, applied at session start when the backend advertises a match
-# (matches a model id or name, case-insensitively). Optional.
-default_model = "opus 4.8"
-
 [backends.claude]
 command = ["claude-code-acp"]
+```
 
-[backends.gemini]
-command = ["gemini", "--experimental-acp"]
+Full reference, with a worked example of every option:
 
-# Keyboard shortcuts (optional; any subset overrides the defaults). A binding is a
-# key or a list of keys. Press ? in the app — or click the ⌨ button — to see the
-# active bindings. focus_next/prev default to "]"/"[" plus the arrow keys.
-[hotkeys]
-new_session = "n"
-focus_next = ["]", "ArrowRight", "ArrowDown"]
+- **[docs/configuration/](docs/configuration/README.md)** — overview and the
+  complete key table.
+- **[docs/configuration/backends.md](docs/configuration/backends.md)** — defining
+  any ACP backend, environment, and pinning a model.
+- **[docs/configuration/hotkeys.md](docs/configuration/hotkeys.md)** — every
+  bindable action and the key-name syntax.
 
 ## CLI
 
@@ -89,24 +82,13 @@ home page and between sessions on a case page (same keys); **Enter** opens the
 focused case (home) or, on a case page, opens a closed session / focuses the open
 session's input box; **Escape** leaves the input box back to navigation. Plus new
 case/session, rename/name/close/delete, toggle always-allow, and cancel. Press `?`
-or click the ⌨ button to see the bindings; customize them under `[hotkeys]`.
-
-### Model selection
+or click the ⌨ button to see the bindings; customize them under `[hotkeys]`
+(see [docs/configuration/hotkeys.md](docs/configuration/hotkeys.md)).
 
 The per-session model dropdown lists exactly the models the backend advertises
-over ACP (`session/new` → `availableModels`), and switching uses ACP
-`session/set_model`. Casebook is vendor-agnostic, so it cannot offer a model the
-backend doesn't expose: if a backend advertises only coarse buckets, that is all
-ACP makes selectable. To pin a finer model, define separate backends — each
-launched with that backend's own model flags/env — and pick the one you want:
-
-```toml
-[backends.assistant-fast]
-command = ["some-acp-agent", "--model", "<fast model the agent understands>"]
-
-[backends.assistant-deep]
-command = ["some-acp-agent", "--model", "<deep model the agent understands>"]
-```
+over ACP. Casebook is vendor-agnostic and can't offer a model the backend doesn't
+expose — see [docs/configuration/backends.md](docs/configuration/backends.md#models)
+for how to pin a specific model.
 
 See `docs/casebook/` decision notes for the design choices behind the
 implementation.

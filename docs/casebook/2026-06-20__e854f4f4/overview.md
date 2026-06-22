@@ -27,6 +27,10 @@ Triage and prioritization of user feedback from the initial implementation
 > collapses a session to the sidebar while delete removes it; all sessions listed
 > in the sidebar) is tracked in
 > [round5-sidebar-sessions-keyboard-focus.md](round5-sidebar-sessions-keyboard-focus.md).
+>
+> **Round-6 feedback** (configuration was underdocumented → dedicated
+> `docs/configuration/` reference for backends and hotkeys) is tracked in
+> [round6-configuration-docs.md](round6-configuration-docs.md).
 
 ## Feedback items
 

@@ -191,15 +191,17 @@ function buildPane(agent) {
   root.className = "agent-pane";
   root.innerHTML = `
     <div class="agent-head">
-      <span class="label"></span>
-      <select class="model" title="model" hidden></select>
-      <span class="state"></span>
-      <button class="rename" title="rename session">✎</button>
-      <button class="autoname" title="name session with the model">✨</button>
-      <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
-      <button class="resume" hidden>Resume</button>
-      <button class="close" title="close session (keep history)">×</button>
-      <button class="delete" title="delete session and history">🗑</button>
+      <div class="agent-head-title"><span class="label"></span></div>
+      <div class="agent-head-controls">
+        <span class="state"></span>
+        <select class="model" title="model" hidden></select>
+        <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
+        <button class="rename" title="rename session">✎</button>
+        <button class="autoname" title="name session with the model">✨</button>
+        <button class="resume" hidden>Resume</button>
+        <button class="close" title="close session (keep history)">×</button>
+        <button class="delete" title="delete session and history">🗑</button>
+      </div>
     </div>
     <div class="transcript"></div>
     <div class="composer">
@@ -312,11 +314,12 @@ function renderItem(agentId, item) {
     role.textContent = item.system ? "system" : item.role;
     node.appendChild(role);
     const body = document.createElement("div");
-    body.className = "content";
     // User text is shown verbatim; everything the model emits is markdown.
     if (item.role === "user") {
+      body.className = "content";
       body.textContent = item.text;
     } else {
+      body.className = "content markdown";
       body.innerHTML = renderMarkdown(item.text);
     }
     node.appendChild(body);
@@ -487,7 +490,10 @@ function isTyping() {
 
 function onKeydown(event) {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.key === "Escape" && !el("hotkey-help").hidden) return toggleHelp();
+  if (event.key === "Escape") {
+    if (!el("file-modal").hidden) return (el("file-modal").hidden = true);
+    if (!el("hotkey-help").hidden) return toggleHelp();
+  }
   if (isTyping()) return;
   const action = state.hotkeyByKey.get(event.key);
   if (!action) return;
@@ -551,7 +557,14 @@ function renderFiles(files) {
 async function openFile(name) {
   const text = await fetch(`/api/cases/${state.activeCase}/files/${encodeURIComponent(name)}`).then((r) => r.text());
   el("file-modal-name").textContent = name;
-  el("file-modal-content").textContent = text;
+  const body = el("file-modal-content");
+  if (/\.(md|markdown)$/i.test(name)) {
+    body.className = "filebody markdown";
+    body.innerHTML = renderMarkdown(text);
+  } else {
+    body.className = "filebody plain";
+    body.textContent = text;
+  }
   el("file-modal").hidden = false;
 }
 

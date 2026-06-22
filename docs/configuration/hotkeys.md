@@ -20,8 +20,9 @@ page (sessions).
 | Action | Default key(s) | Where | What it does |
 |---|---|---|---|
 | `new_case` | `c` | anywhere | Prompt for a title, create a case, open its page. |
-| `new_session` | `n` | case page | Start a new session (uses the sidebar's backend picker). |
+| `new_session` | `n` | home / case | Case page: start a new session. Home page: create a case (so "new" is one key everywhere). |
 | `home` | `h` | case page | Go back to the cases home page. |
+| `cycle_width` | `w` | case page | Step the session-column width through the configured list (see [ui sizing](README.md#ui-sizing)). |
 | `focus_next` | `]` `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
 | `focus_prev` | `[` `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |
 | `open_focused` | `Enter` | home / case | Home: open the focused case. Case page: focus the open session's input box, or open (resume) the focused session if it's closed. |
@@ -29,7 +30,7 @@ page (sessions).
 | `name_session` | `g` | case page | Ask the model to name the focused session. |
 | `resume_session` | `e` | case page | Open (resume) the focused session if it's closed. |
 | `close_session` | `x` | case page | Close the focused session if it's open (collapses it to the sidebar). |
-| `delete_session` | `d` | case page | Delete the focused session and its history (asks to confirm). |
+| `delete_session` | `d` | home / case | Case page: delete the focused session. Home page: delete the focused case and all its sessions. Both ask to confirm. |
 | `toggle_allow` | `a` | case page | Toggle "always allow" permissions on the focused session. |
 | `cancel_turn` | `s` | case page | Cancel the focused session's current turn. |
 | `help` | `?` | anywhere | Toggle the shortcuts overlay. |

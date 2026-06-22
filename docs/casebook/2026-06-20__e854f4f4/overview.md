@@ -42,6 +42,11 @@ Triage and prioritization of user feedback from the initial implementation
 > surface ACP usage in the pane header; console prints session running/idle status)
 > is tracked in
 > [round8-usage-display-no-cleanup-columns-console.md](round8-usage-display-no-cleanup-columns-console.md).
+>
+> **Round-9 feedback** (richer home cases list with delete; shared new/delete
+> hotkeys; session-column resize hotkey cycling configured widths; top-bar
+> redesign) is tracked in
+> [round9-home-details-resize-topbar.md](round9-home-details-resize-topbar.md).
 
 ## Feedback items
 

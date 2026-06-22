@@ -67,12 +67,14 @@ fraction of the screen, `px`/`em`/`rem` for fixed sizes, `none` for no maximum.
 | `session_width` | `"50%"` | The basis width of each session column (default: two columns fill the width). |
 | `session_min_width` | `"320px"` | Never shrink a column below this. |
 | `session_max_width` | `"none"` | Never grow a column beyond this. |
+| `session_widths` | `["20%","33%","50%","66%","75%","100%"]` | Widths the resize hotkey (`cycle_width`, default `w`) cycles through. Your last choice is remembered per browser. |
 
 ```toml
 [ui]
 session_width = "33vw"      # each column is a third of the viewport…
 session_min_width = "28em"  # …but at least this wide…
 session_max_width = "720px" # …and never wider than this.
+session_widths = ["33%", "50%", "100%"]  # the `w` hotkey cycles these
 ```
 
 Columns don't grow or shrink to fit; when they overflow the window the main area

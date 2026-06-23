@@ -27,6 +27,11 @@ from .engine.session import AgentSession, SessionManager
 # worth persisting so a session survives a restart.
 _REPLAYABLE = {"message", "tool_call", "notice", "plan"}
 
+# Reserved case id for caseless ("scratch") sessions: no case directory, no
+# directive, no file watching. Real case ids are `YYYY-MM-DD__hex`, so this never
+# collides. Scratch sessions are persisted under .casebook/sessions/scratch/.
+SCRATCH_CASE_ID = "scratch"
+
 
 def _now_iso() -> str:
     return datetime.datetime.now().isoformat()
@@ -261,15 +266,17 @@ class CaseCoordinator:
         label: Optional[str] = None,
         backend_name: Optional[str] = None,
     ) -> str:
-        case = cases.resolve_case(self.casebook_root, case_id)
+        scratch = case_id == SCRATCH_CASE_ID
+        case = None if scratch else cases.resolve_case(self.casebook_root, case_id)
+        cid = SCRATCH_CASE_ID if scratch else case.case_id
         backend = self.config.select_backend(backend_name)
-        existing = sum(1 for a in self._agents.values() if a["case_id"] == case.case_id)
+        existing = sum(1 for a in self._agents.values() if a["case_id"] == cid)
         agent_id = self.sessions.new_agent_id()
         label = label or f"Session {existing + 1}"
         session = AgentSession(
             agent_id=agent_id,
             label=label,
-            case_id=case.case_id,
+            case_id=cid,
             project_root=self.project_root,
             backend=backend,
             emit=self._emit,
@@ -281,7 +288,7 @@ class CaseCoordinator:
         self._auto_named[agent_id] = True
         self._agents[agent_id] = {
             "agent_id": agent_id,
-            "case_id": case.case_id,
+            "case_id": cid,
             "label": label,
             "backend": backend.name,
             "model": None,
@@ -289,7 +296,8 @@ class CaseCoordinator:
             "state": "starting",
             "live": True,
         }
-        self._watch_case(case)
+        if case is not None:
+            self._watch_case(case)
         self._persist_meta(agent_id)
         self._emit({"type": "agent_added", **self._agents[agent_id]})
         try:
@@ -301,18 +309,17 @@ class CaseCoordinator:
             self._created.pop(agent_id, None)
             self._auto_named.pop(agent_id, None)
             self._persisted.discard(agent_id)
-            self.store.delete(case.case_id, agent_id)
-            self._emit({"type": "agent_removed", "agent_id": agent_id,
-                        "case_id": case.case_id})
-            self._emit({"type": "notice", "agent_id": agent_id,
-                        "case_id": case.case_id,
+            self.store.delete(cid, agent_id)
+            self._emit({"type": "agent_removed", "agent_id": agent_id, "case_id": cid})
+            self._emit({"type": "notice", "agent_id": agent_id, "case_id": cid,
                         "message": f"failed to start agent: {error}"})
             raise
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
-        # The directive is prepended to the first user message rather than sent as
-        # its own turn, so a new session doesn't query the agent until the user does.
-        self._pending_context[agent_id] = templates.system_instructions(case.case_id)
+        # Case sessions get the directive prepended to their first message; a
+        # caseless (scratch) session gets nothing — it's a plain agent.
+        if not scratch:
+            self._pending_context[agent_id] = templates.system_instructions(cid)
         self._persist_meta(agent_id)
         return agent_id
 
@@ -323,7 +330,8 @@ class CaseCoordinator:
             raise cases.CasebookError(f"no such session: {agent_id}")
         if agent.get("live"):
             return
-        case = cases.resolve_case(self.casebook_root, agent["case_id"])
+        scratch = agent["case_id"] == SCRATCH_CASE_ID
+        case = None if scratch else cases.resolve_case(self.casebook_root, agent["case_id"])
         try:
             backend = self.config.select_backend(agent["backend"] or None)
         except KeyError as error:
@@ -343,7 +351,8 @@ class CaseCoordinator:
         self.sessions.add(session)
         agent["state"] = "starting"
         agent["live"] = True
-        self._watch_case(case)
+        if case is not None:
+            self._watch_case(case)
         self._emit({"type": "agent_updated", **agent})
         try:
             loaded = await session.resume(self._acp_ids.get(agent_id))
@@ -360,12 +369,10 @@ class CaseCoordinator:
         await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
         if not loaded:
-            # No native session/load: re-send the directive + saved transcript as
-            # context on the next message, and say the continuity is imperfect.
-            self._pending_context[agent_id] = (
-                f"{templates.system_instructions(agent['case_id'])}\n\n"
-                f"{self._context_prompt(agent_id)}"
-            )
+            # No native session/load: re-send the saved transcript as context on
+            # the next message (prefixed with the directive for case sessions).
+            prefix = "" if scratch else f"{templates.system_instructions(agent['case_id'])}\n\n"
+            self._pending_context[agent_id] = f"{prefix}{self._context_prompt(agent_id)}"
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "message": "Context re-sent from saved transcript "
@@ -383,6 +390,31 @@ class CaseCoordinator:
             "off.\n\n=== prior conversation ===\n"
             f"{body}\n=== end of prior conversation ==="
         )
+
+    async def promote_agent(self, agent_id: str, title: str) -> Optional[str]:
+        """Promote a caseless (scratch) session into a new case, migrating it.
+
+        Creates the case, moves the session's on-disk data into it, and re-tags the
+        live session — the subprocess keeps running. Returns the new case id (or
+        None if the session isn't a scratch session).
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None or agent["case_id"] != SCRATCH_CASE_ID:
+            return None
+        case = cases.create_case(self.casebook_root, title or "Unnamed case")
+        new_cid = case.case_id
+        self.store.relocate(SCRATCH_CASE_ID, new_cid, agent_id)
+        agent["case_id"] = new_cid
+        session = self.sessions.get(agent_id)
+        if session is not None:
+            session.retag(new_cid)
+        self._watch_case(case)
+        self._persist_meta(agent_id)  # rewrite meta.toml under the new case dir
+        # Drop the pane from scratch views; refresh the home cases list.
+        self._emit({"type": "agent_removed", "agent_id": agent_id,
+                    "case_id": SCRATCH_CASE_ID})
+        self._emit({"type": "case_created", **self._case_summary(case)})
+        return new_cid
 
     async def _apply_models(self, agent_id: str, session: AgentSession) -> None:
         """Apply the configured default-model preference and publish the model list."""

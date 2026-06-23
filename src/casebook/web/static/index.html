@@ -17,6 +17,7 @@
     <div id="layout">
       <aside id="sidebar">
         <div id="cases-nav">
+          <a id="scratch-link" href="/scratch">⚡ Scratch sessions</a>
           <div class="sidebar-head">
             <h2>Cases</h2>
             <button id="new-case" title="new case">+ case</button>
@@ -30,8 +31,10 @@
           </div>
           <select id="backend-select" title="backend for new sessions" hidden></select>
           <ul id="session-list"></ul>
-          <div class="sidebar-head files-head"><h2>Files</h2></div>
-          <ul id="file-list"></ul>
+          <div id="files-section">
+            <div class="sidebar-head files-head"><h2>Files</h2></div>
+            <ul id="file-list"></ul>
+          </div>
         </div>
       </aside>
       <main id="workspace">

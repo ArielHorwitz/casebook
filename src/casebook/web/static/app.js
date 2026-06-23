@@ -6,9 +6,14 @@
 function parseRoute() {
   const match = location.pathname.match(/^\/case\/(.+)$/);
   if (match) return { mode: "case", caseId: decodeURIComponent(match[1]) };
+  if (location.pathname === "/scratch") return { mode: "scratch", caseId: "scratch" };
   return { mode: "home", caseId: null };
 }
 const route = parseRoute();
+// Case pages and the scratch page both show sessions; the home page shows cases.
+function isSessionPage() {
+  return route.mode === "case" || route.mode === "scratch";
+}
 
 // --- state ----------------------------------------------------------------
 const state = {
@@ -147,7 +152,7 @@ function applySnapshot(snapshot) {
 // A pane is built only for an open (live) session; closed ones live in the
 // sidebar list and take no pane space until reopened.
 function upsertAgent(agent) {
-  if (route.mode !== "case" || agent.case_id !== route.caseId) return;
+  if (!isSessionPage() || agent.case_id !== route.caseId) return;
   state.agents.set(agent.agent_id, agent);
   if (!state.transcripts.has(agent.agent_id)) state.transcripts.set(agent.agent_id, []);
   if (agent.live) {
@@ -238,6 +243,7 @@ function buildPane(agent) {
         <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
         <button class="rename" title="rename session">✎</button>
         <button class="autoname" title="name session with the model">✨</button>
+        <button class="promote" title="promote into a new case" hidden>↑ case</button>
         <button class="resume" hidden>Resume</button>
         <button class="close" title="close session (keep history)">×</button>
         <button class="delete" title="delete session and history">🗑</button>
@@ -278,6 +284,9 @@ function buildPane(agent) {
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => sessionDelete(agent.agent_id);
+  const promoteBtn = root.querySelector(".promote");
+  promoteBtn.hidden = route.mode !== "scratch"; // only caseless sessions promote
+  promoteBtn.onclick = () => promoteSession(agent.agent_id);
   root.addEventListener("mousedown", () => focusSession(agent.agent_id));
 
   const pane = {
@@ -614,9 +623,9 @@ function runAction(action) {
     case "new_case": return newCase();
     // "new" and "delete" reuse the same keys on both pages: on home they act on
     // cases, on a case page on sessions.
-    case "new_session": return route.mode === "case" ? newSession() : newCase();
+    case "new_session": return isSessionPage() ? newSession() : newCase();
     case "delete_session": if (route.mode === "home") return deleteFocusedCase(); break;
-    case "home": return route.mode === "case" ? (location.href = "/") : undefined;
+    case "home": return route.mode !== "home" ? (location.href = "/") : undefined;
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
@@ -624,7 +633,7 @@ function runAction(action) {
     case "cancel_turn": return cancelTurn();
     case "help": return toggleHelp();
   }
-  if (route.mode !== "case" || !agent) return; // session actions need a focused session
+  if (!isSessionPage() || !agent) return; // session actions need a focused session
   switch (action) {
     case "rename_session": return sessionRename(id);
     case "name_session": return send({ action: "name_agent", agent_id: id });
@@ -637,7 +646,7 @@ function runAction(action) {
 // Stop the focused session's running turn. Only ever the focused session — never
 // reaches for other sessions.
 function cancelTurn() {
-  if (route.mode === "case" && state.focusedAgent) {
+  if (isSessionPage() && state.focusedAgent) {
     send({ action: "cancel", agent_id: state.focusedAgent });
   }
 }
@@ -821,17 +830,30 @@ async function loadBackends() {
   select.hidden = info.backends.length <= 1;
 }
 
+async function promoteSession(agentId) {
+  const title = prompt("Promote this session into a new case — title:", "Unnamed case");
+  if (title === null) return;
+  const res = await fetch("/api/promote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, title: title.trim() || "Unnamed case" }),
+  }).then((r) => r.json()).catch(() => null);
+  if (res && res.case_id) location.href = caseUrl(res.case_id);
+}
+
 function applyRoute() {
   const home = route.mode === "home";
+  const scratch = route.mode === "scratch";
   document.body.classList.toggle("home", home);
   document.body.classList.toggle("case", !home);
   el("cases-nav").hidden = !home;
   el("case-nav").hidden = home;
+  el("files-section").hidden = !route.caseId || scratch; // scratch has no files
   el("agents").hidden = home;
   el("case-detail").hidden = true; // shown on the home page when a case is focused
   el("placeholder").hidden = !home;
   el("back-cases").hidden = home;
-  // The brand is the home heading; a case page leads with the back button + title.
+  // The brand is the home heading; a session page leads with the back button + title.
   document.querySelector(".brand").hidden = !home;
   el("case-title").hidden = home;
 }
@@ -853,6 +875,10 @@ loadUi();
 connect();
 if (route.mode === "home") {
   loadCases();
+} else if (route.mode === "scratch") {
+  loadBackends();
+  el("case-title").textContent = "Scratch sessions";
+  document.title = "Scratch — casebook";
 } else {
   loadBackends();
   openCaseView(route.caseId);

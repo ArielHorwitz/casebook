@@ -57,6 +57,14 @@ class SessionStore:
         if session_dir.exists():
             shutil.rmtree(session_dir)
 
+    def relocate(self, old_case_id: str, new_case_id: str, agent_id: str) -> None:
+        """Move a session's on-disk directory from one case to another."""
+        old = self._session_dir(old_case_id, agent_id)
+        new = self._session_dir(new_case_id, agent_id)
+        if old.exists():
+            new.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old), str(new))
+
     def load_all(self) -> list[StoredSession]:
         """Every persisted session, oldest case/agent directory first."""
         if not self.root.exists():

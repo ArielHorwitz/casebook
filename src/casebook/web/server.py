@@ -56,6 +56,13 @@ def create_app(project_root: Path) -> Starlette:
             return JSONResponse(summary, status_code=201)
         return JSONResponse(engine().list_cases())
 
+    async def promote(request: Request) -> JSONResponse:
+        body = await request.json()
+        new_case_id = await engine().promote_agent(body["agent_id"], body.get("title", "Unnamed case"))
+        if new_case_id is None:
+            return JSONResponse({"error": "not a scratch session"}, status_code=400)
+        return JSONResponse({"case_id": new_case_id}, status_code=201)
+
     async def list_backends(_request: Request) -> JSONResponse:
         return JSONResponse(engine().list_backends())
 
@@ -93,8 +100,10 @@ def create_app(project_root: Path) -> Starlette:
         routes=[
             Route("/", index),
             Route("/case/{case_id}", index),
+            Route("/scratch", index),
             Route("/api/cases", cases_endpoint, methods=["GET", "POST"]),
             Route("/api/backends", list_backends),
+            Route("/api/promote", promote, methods=["POST"]),
             Route("/api/hotkeys", hotkeys),
             Route("/api/ui", ui_config),
             Route("/api/cases/{case_id}", case_detail, methods=["GET", "DELETE"]),

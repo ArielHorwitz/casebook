@@ -42,6 +42,7 @@ class AgentSession:
 
     _stack: AsyncExitStack = field(default_factory=AsyncExitStack, init=False)
     _conn: Any = field(default=None, init=False)
+    _client: Any = field(default=None, init=False)
     _acp_session_id: Optional[str] = field(default=None, init=False)
     _busy: bool = field(default=False, init=False)
     _supports_load: bool = field(default=False, init=False)
@@ -52,6 +53,13 @@ class AgentSession:
     @property
     def acp_session_id(self) -> Optional[str]:
         return self._acp_session_id
+
+    def retag(self, case_id: str) -> None:
+        """Move a live session to a different case (used when promoting a scratch
+        session). Future events carry the new case id."""
+        self.case_id = case_id
+        if self._client is not None:
+            self._client.case_id = case_id
 
     def _capture_models(self, response: Any) -> None:
         """Record the advertised model list and current model from a session response."""
@@ -93,6 +101,7 @@ class AgentSession:
             self._guarded_emit,
             self.request_permission,
         )
+        self._client = client
         # The backend is the user's own trusted agent; pass the full environment
         # (not the trimmed MCP default) so it keeps PATH and ambient auth.
         environment = {**os.environ, **self.backend.env}

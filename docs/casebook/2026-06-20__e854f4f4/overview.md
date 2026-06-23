@@ -51,6 +51,10 @@ Triage and prioritization of user feedback from the initial implementation
 > **Round-10 feedback** (compact title-only home list with details in the main
 > view; wider sidebar; keyboard stop for a running turn) is tracked in
 > [round10-home-detail-view-stop-hotkey.md](round10-home-detail-view-stop-hotkey.md).
+>
+> **Round-11 feedback** (caseless "scratch" sessions promotable into a case; logo
+> in the top bar; `default` → `default_backend`; scratch/home hotkeys) is tracked
+> in [round11-scratch-sessions-logo-config.md](round11-scratch-sessions-logo-config.md).
 
 ## Feedback items
 

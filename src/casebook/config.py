@@ -57,6 +57,7 @@ DEFAULT_HOTKEYS = {
     "new_case": "c",
     "new_session": "n",
     "home": "h",
+    "scratch": "S",
     "focus_next": ["]", "ArrowRight", "ArrowDown"],
     "focus_prev": ["[", "ArrowLeft", "ArrowUp"],
     "open_focused": "Enter",
@@ -185,7 +186,8 @@ def load_config(project_root: Optional[Path] = None) -> Config:
     backends = builtin_backends()
     backends.update(_parse_backends(data.get("backends", {})))
 
-    default = data.get("default")
+    # `default_backend` is the explicit key; `default` is still accepted.
+    default = data.get("default_backend") or data.get("default")
     if default is None:
         # Prefer a real backend (claude) when present; fall back to echo.
         default = CLAUDE_BACKEND_NAME if CLAUDE_BACKEND_NAME in backends else ECHO_BACKEND_NAME

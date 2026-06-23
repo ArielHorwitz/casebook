@@ -21,7 +21,7 @@ ambient credentials, etc.), not a trimmed one.
 ## Schema
 
 Each backend is a table under `[backends.<name>]`. `<name>` is what you'll see in
-the backend picker and can set as `default`.
+the backend picker and can set as `default_backend`.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -51,11 +51,12 @@ built-in of the same name).
 
 ## Choosing the default
 
-`default` selects the backend new sessions use unless you pick another in the UI.
-If you don't set it, casebook uses `claude` when available, otherwise `echo`.
+`default_backend` selects the backend new sessions use unless you pick another in
+the UI. If you don't set it, casebook uses `claude` when available, otherwise
+`echo`. (The older name `default` is still accepted.)
 
 ```toml
-default = "gemini"
+default_backend = "gemini"
 ```
 
 ## Worked examples
@@ -102,7 +103,7 @@ command = ["some-acp-agent", "--model", "<fast model the agent understands>"]
 command = ["some-acp-agent", "--model", "<deep model the agent understands>"]
 ```
 
-Then pick the backend you want from the picker (or set `default`).
+Then pick the backend you want from the picker (or set `default_backend`).
 
 ## Naming {#naming}
 

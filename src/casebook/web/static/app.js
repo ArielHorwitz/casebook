@@ -626,6 +626,7 @@ function runAction(action) {
     case "new_session": return isSessionPage() ? newSession() : newCase();
     case "delete_session": if (route.mode === "home") return deleteFocusedCase(); break;
     case "home": return route.mode !== "home" ? (location.href = "/") : undefined;
+    case "scratch": return route.mode !== "scratch" ? (location.href = "/scratch") : undefined;
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
@@ -853,8 +854,8 @@ function applyRoute() {
   el("case-detail").hidden = true; // shown on the home page when a case is focused
   el("placeholder").hidden = !home;
   el("back-cases").hidden = home;
-  // The brand is the home heading; a session page leads with the back button + title.
-  document.querySelector(".brand").hidden = !home;
+  // The logo stays in the top bar on every page; case/scratch pages add the back
+  // button + title.
   el("case-title").hidden = home;
 }
 

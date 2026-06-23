@@ -21,7 +21,8 @@ page (sessions).
 |---|---|---|---|
 | `new_case` | `c` | anywhere | Prompt for a title, create a case, open its page. |
 | `new_session` | `n` | home / case | Case page: start a new session. Home page: create a case (so "new" is one key everywhere). |
-| `home` | `h` | case page | Go back to the cases home page. |
+| `home` | `h` | anywhere | Go to the cases home page. |
+| `scratch` | `S` | anywhere | Go to the scratch page (caseless one-off sessions). |
 | `cycle_width` | `w` | case page | Step the session-column width through the configured list (see [ui sizing](README.md#ui-sizing)). |
 | `focus_next` | `]` `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
 | `focus_prev` | `[` `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |

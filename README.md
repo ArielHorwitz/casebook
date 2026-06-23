@@ -29,7 +29,7 @@ overridden per-project in `.casebook/config.toml`. It configures backends, the
 default model, session naming, and keyboard shortcuts:
 
 ```toml
-default = "claude"
+default_backend = "claude"
 
 [backends.claude]
 command = ["claude-code-acp"]
@@ -76,6 +76,11 @@ saved transcript as context on your next message and says so.) Sessions working
 the same case coordinate through the filesystem, not through each other. Edit
 files in your own editor; the app watches the case directory and the agents read
 fresh on their next turn.
+
+For one-off queries, the **Scratch** page (linked from the home page) runs
+**caseless** sessions — plain agents with no case directive and no files panel. A
+scratch session can be **promoted into a new case** (↑ case), migrating the live
+session and its history into it.
 
 Every session runs server-side independent of the browser — all sessions in all
 cases keep running regardless of which pages are open. The terminal running

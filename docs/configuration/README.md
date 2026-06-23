@@ -21,7 +21,7 @@ a backend without redefining the global ones).
 
 | Key | Type | Default | What it does |
 |---|---|---|---|
-| `default_backend` | string | `"claude"` if available, else `"echo"` | Which backend new sessions use unless one is picked in the UI. (The older name `default` is still accepted.) |
+| `default_backend` | string | `"claude"` if available, else `"echo"` | Which backend new sessions use unless one is picked in the UI. |
 | `default_model` | string | — | Preferred model, applied at session start when the backend advertises a match (loose match on model id or name). See [backends.md](backends.md#models). |
 | `naming_prompt` | string | (built-in) | Instructions handed to the model by the "name session" button. |
 | `naming_backend` | string | the session's own backend | Which backend names sessions. `echo` is never used for naming. See [backends.md](backends.md#naming). |

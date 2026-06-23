@@ -26,8 +26,8 @@ the top bar on **every** page (home, case, scratch), replacing the text wordmark
 
 ## 3. Clearer config key
 
-The backend default key is now **`default_backend`** (the old `default` is still
-accepted for back-compat). Docs and the README example updated.
+The backend default key is now **`default_backend`** (the old `default` is no
+longer accepted — no back-compat needed). Docs and the README example updated.
 
 ## New hotkeys this round
 

@@ -186,8 +186,7 @@ def load_config(project_root: Optional[Path] = None) -> Config:
     backends = builtin_backends()
     backends.update(_parse_backends(data.get("backends", {})))
 
-    # `default_backend` is the explicit key; `default` is still accepted.
-    default = data.get("default_backend") or data.get("default")
+    default = data.get("default_backend")
     if default is None:
         # Prefer a real backend (claude) when present; fall back to echo.
         default = CLAUDE_BACKEND_NAME if CLAUDE_BACKEND_NAME in backends else ECHO_BACKEND_NAME

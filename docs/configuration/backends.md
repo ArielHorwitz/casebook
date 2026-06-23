@@ -53,7 +53,7 @@ built-in of the same name).
 
 `default_backend` selects the backend new sessions use unless you pick another in
 the UI. If you don't set it, casebook uses `claude` when available, otherwise
-`echo`. (The older name `default` is still accepted.)
+`echo`.
 
 ```toml
 default_backend = "gemini"

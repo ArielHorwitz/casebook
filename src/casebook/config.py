@@ -57,7 +57,7 @@ DEFAULT_HOTKEYS = {
     "new_case": "c",
     "new_session": "n",
     "home": "h",
-    "scratch": "S",
+    "scratch": "s",
     "focus_next": ["]", "ArrowRight", "ArrowDown"],
     "focus_prev": ["[", "ArrowLeft", "ArrowUp"],
     "open_focused": "Enter",
@@ -66,7 +66,7 @@ DEFAULT_HOTKEYS = {
     "close_session": "x",
     "delete_session": "d",
     "toggle_allow": "a",
-    "cancel_turn": "s",
+    "cancel_turn": "S",
     "cycle_width": "w",
     "help": "?",
 }

@@ -22,7 +22,7 @@ page (sessions).
 | `new_case` | `c` | anywhere | Prompt for a title, create a case, open its page. |
 | `new_session` | `n` | home / case | Case page: start a new session. Home page: create a case (so "new" is one key everywhere). |
 | `home` | `h` | anywhere | Go to the cases home page. |
-| `scratch` | `S` | anywhere | Go to the scratch page (caseless one-off sessions). |
+| `scratch` | `s` | anywhere | Go to the scratch page (caseless one-off sessions). |
 | `cycle_width` | `w` | case page | Step the session-column width through the configured list (see [ui sizing](README.md#ui-sizing)). |
 | `focus_next` | `]` `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
 | `focus_prev` | `[` `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |
@@ -32,7 +32,7 @@ page (sessions).
 | `close_session` | `x` | case page | Close the focused session if it's open (collapses it to the sidebar). |
 | `delete_session` | `d` | home / case | Case page: delete the focused session. Home page: delete the focused case and all its sessions. Both ask to confirm. |
 | `toggle_allow` | `a` | case page | Toggle "always allow" permissions on the focused session. |
-| `cancel_turn` | `s` | case page | Stop the focused session's running turn (e.g. to abort a long tool call). |
+| `cancel_turn` | `S` | case page | Stop the focused session's running turn (e.g. to abort a long tool call). |
 | `help` | `?` | anywhere | Toggle the shortcuts overlay. |
 
 ### Always-on keys (not configurable)

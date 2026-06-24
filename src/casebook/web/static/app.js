@@ -1,49 +1,65 @@
 "use strict";
 
 // --- routing ---------------------------------------------------------------
-// Each case is its own page (/case/<id>); the cases list is the home page (/).
-// Browser tabs do the multiplexing — there are no in-app tabs.
+// Nested under /project/{id}/ — the project browser lives at /.
 function parseRoute() {
-  const match = location.pathname.match(/^\/case\/(.+)$/);
-  if (match) return { mode: "case", caseId: decodeURIComponent(match[1]) };
-  if (location.pathname === "/scratch") return { mode: "scratch", caseId: "scratch" };
-  return { mode: "home", caseId: null };
+  const projectCase = location.pathname.match(/^\/project\/([^/]+)\/case\/(.+)$/);
+  if (projectCase) return { mode: "case", projectId: projectCase[1], caseId: decodeURIComponent(projectCase[2]) };
+  const projectScratch = location.pathname.match(/^\/project\/([^/]+)\/scratch$/);
+  if (projectScratch) return { mode: "scratch", projectId: projectScratch[1], caseId: "scratch" };
+  const project = location.pathname.match(/^\/project\/([^/]+)\/?$/);
+  if (project) return { mode: "home", projectId: project[1], caseId: null };
+  return { mode: "projects", projectId: null, caseId: null };
 }
 const route = parseRoute();
-// Case pages and the scratch page both show sessions; the home page shows cases.
 function isSessionPage() {
   return route.mode === "case" || route.mode === "scratch";
+}
+
+// --- URL helpers -----------------------------------------------------------
+function projectUrl(projectId) {
+  return `/project/${encodeURIComponent(projectId)}/`;
+}
+function caseUrl(caseId) {
+  return `/project/${encodeURIComponent(route.projectId)}/case/${encodeURIComponent(caseId)}`;
+}
+function scratchUrl() {
+  return `/project/${encodeURIComponent(route.projectId)}/scratch`;
+}
+function apiBase() {
+  return `/api/projects/${encodeURIComponent(route.projectId)}`;
 }
 
 // --- state ----------------------------------------------------------------
 const state = {
   ws: null,
-  activeCase: route.caseId, // the case this page is scoped to (null on home)
-  agents: new Map(), // agent_id -> {agent_id, case_id, label, backend, model, state, live}
-  transcripts: new Map(), // agent_id -> [item]
-  models: new Map(), // agent_id -> {available: [{model_id, name}], current}
-  usage: new Map(), // agent_id -> {used, size, total_tokens, cost_amount, cost_currency}
-  panes: new Map(), // agent_id -> {root, transcript, input, sendBtn, cancelBtn, stateEl}
-  focusedAgent: null, // agent_id of the keyboard-focused session pane
-  focusedCase: null, // case_id of the keyboard-focused case (home page)
-  cases: [], // case summaries shown on the home page
-  hotkeyByKey: new Map(), // KeyboardEvent.key -> action name
-  widths: [], // configured session-column widths the resize hotkey cycles
+  activeCase: route.caseId,
+  agents: new Map(),
+  transcripts: new Map(),
+  models: new Map(),
+  usage: new Map(),
+  panes: new Map(),
+  focusedAgent: null,
+  focusedCase: null,
+  focusedProject: null,
+  cases: [],
+  projects: [],
+  hotkeyByKey: new Map(),
+  widths: [],
   widthIndex: -1,
 };
 
 const el = (id) => document.getElementById(id);
 
-// Render model output as markdown, sanitized — the agent's text is semi-trusted
-// (it may quote files or web content), so we never inject raw HTML.
 marked.setOptions({ gfm: true, breaks: true });
 function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text || ""));
 }
 
-// --- websocket ------------------------------------------------------------
+// --- websocket (project-scoped) -------------------------------------------
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  if (!route.projectId) return; // project browser has no websocket
+  const ws = new WebSocket(`ws://${location.host}/ws/${encodeURIComponent(route.projectId)}`);
   state.ws = ws;
   ws.onopen = () => setConnection(true);
   ws.onclose = () => {
@@ -61,7 +77,7 @@ function send(action) {
   }
 }
 
-// --- toasts (transient feedback for things with no home in a transcript) ---
+// --- toasts ----------------------------------------------------------------
 function toast(message, kind = "info") {
   const node = document.createElement("div");
   node.className = `toast ${kind}`;
@@ -77,20 +93,17 @@ function setConnection(connected) {
   node.className = connected ? "connected" : "disconnected";
 }
 
-// --- event handling (single reducer for live + replayed events) -----------
+// --- event handling --------------------------------------------------------
 function handleEvent(event) {
   if (event.type === "snapshot") return applySnapshot(event);
   if (route.mode === "home") {
-    // The home page only tracks the case list; session events belong to pages.
     if (event.type === "case_created" || event.type === "case_deleted") loadCases();
     return;
   }
-  // A case page whose case was deleted (elsewhere) returns to the home page.
   if (event.type === "case_deleted" && event.case_id === route.caseId) {
-    location.href = "/";
+    location.href = projectUrl(route.projectId);
     return;
   }
-  // A case page ignores everything that isn't about its own case.
   if (event.case_id && event.case_id !== route.caseId) return;
   switch (event.type) {
     case "agent_added":
@@ -102,16 +115,14 @@ function handleEvent(event) {
       state.models.set(event.agent_id, { available: event.available || [], current: event.current });
       return renderModel(event.agent_id);
     case "usage": {
-      const u = state.usage.get(event.agent_id) || {};
-      for (const k of ["used", "size", "input_tokens", "output_tokens", "total_tokens", "cost_amount", "cost_currency"]) {
-        if (event[k] != null) u[k] = event[k];
+      const usage = state.usage.get(event.agent_id) || {};
+      for (const key of ["used", "size", "input_tokens", "output_tokens", "total_tokens", "cost_amount", "cost_currency"]) {
+        if (event[key] != null) usage[key] = event[key];
       }
-      state.usage.set(event.agent_id, u);
+      state.usage.set(event.agent_id, usage);
       return renderUsage(event.agent_id);
     }
     case "notice":
-      // Notices tied to a live session go in its transcript; orphans (failed
-      // starts, case-level messages) would otherwise vanish — surface as a toast.
       if (event.agent_id && state.transcripts.has(event.agent_id)) {
         return applyToTranscript(event);
       }
@@ -148,9 +159,6 @@ function applySnapshot(snapshot) {
   applyPaneVisibility();
 }
 
-// Handles both agent_added and agent_updated (e.g. live <-> stored transitions).
-// A pane is built only for an open (live) session; closed ones live in the
-// sidebar list and take no pane space until reopened.
 function upsertAgent(agent) {
   if (!isSessionPage() || agent.case_id !== route.caseId) return;
   state.agents.set(agent.agent_id, agent);
@@ -166,8 +174,6 @@ function upsertAgent(agent) {
   applyPaneVisibility();
 }
 
-// Drop a session's pane from the main area but keep its state and transcript so
-// reopening it restores the history.
 function removePaneOnly(agentId) {
   const pane = state.panes.get(agentId);
   if (pane) pane.root.remove();
@@ -185,7 +191,6 @@ function removeAgent(agentId) {
   applyPaneVisibility();
 }
 
-// Mutate the transcript array, then re-render just that agent's transcript.
 function applyToTranscript(event) {
   const agentId = event.agent_id;
   if (event.type === "agent_state") {
@@ -208,7 +213,7 @@ function applyToTranscript(event) {
       items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system });
     }
   } else if (event.type === "tool_call") {
-    const existing = items.find((i) => i.kind === "tool" && i.id === event.tool_call_id);
+    const existing = items.find((item) => item.kind === "tool" && item.id === event.tool_call_id);
     if (existing) {
       if (event.title) existing.title = event.title;
       if (event.tool_kind) existing.tool_kind = event.tool_kind;
@@ -221,7 +226,7 @@ function applyToTranscript(event) {
   } else if (event.type === "permission_request") {
     items.push({ kind: "permission", request_id: event.request_id, tool_call: event.tool_call, options: event.options, resolved: false });
   } else if (event.type === "permission_resolved") {
-    const perm = items.find((i) => i.kind === "permission" && i.request_id === event.request_id);
+    const perm = items.find((item) => item.kind === "permission" && item.request_id === event.request_id);
     if (perm) perm.resolved = true;
   } else {
     return;
@@ -241,12 +246,12 @@ function buildPane(agent) {
         <span class="state"></span>
         <select class="model" title="model" hidden></select>
         <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
-        <button class="rename" title="rename session">✎</button>
-        <button class="autoname" title="name session with the model">✨</button>
-        <button class="promote" title="promote into a new case" hidden>↑ case</button>
+        <button class="rename" title="rename session">&#x270E;</button>
+        <button class="autoname" title="name session with the model">&#x2728;</button>
+        <button class="promote" title="promote into a new case" hidden>&#x2191; case</button>
         <button class="resume" hidden>Resume</button>
-        <button class="close" title="close session (keep history)">×</button>
-        <button class="delete" title="delete session and history">🗑</button>
+        <button class="close" title="close session (keep history)">&#xd7;</button>
+        <button class="delete" title="delete session and history">&#x1F5D1;</button>
       </div>
       <div class="agent-usage"></div>
     </div>
@@ -268,9 +273,9 @@ function buildPane(agent) {
     input.value = "";
   };
   sendBtn.onclick = doSend;
-  input.onkeydown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+  input.onkeydown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
       doSend();
     }
   };
@@ -285,7 +290,7 @@ function buildPane(agent) {
   root.querySelector(".close").onclick = () => send({ action: "close_agent", agent_id: agent.agent_id });
   root.querySelector(".delete").onclick = () => sessionDelete(agent.agent_id);
   const promoteBtn = root.querySelector(".promote");
-  promoteBtn.hidden = route.mode !== "scratch"; // only caseless sessions promote
+  promoteBtn.hidden = route.mode !== "scratch";
   promoteBtn.onclick = () => promoteSession(agent.agent_id);
   root.addEventListener("mousedown", () => focusSession(agent.agent_id));
 
@@ -310,29 +315,29 @@ function buildPane(agent) {
   renderUsage(agent.agent_id);
 }
 
-function fmtTokens(n) {
-  if (n == null) return null;
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
-  return String(n);
+function fmtTokens(count) {
+  if (count == null) return null;
+  if (count >= 1e6) return (count / 1e6).toFixed(1) + "M";
+  if (count >= 1e3) return (count / 1e3).toFixed(1) + "k";
+  return String(count);
 }
 
 function renderUsage(agentId) {
   const pane = state.panes.get(agentId);
   if (!pane) return;
-  const u = state.usage.get(agentId);
+  const usage = state.usage.get(agentId);
   const parts = [];
-  if (u) {
-    if (u.used != null && u.size != null) {
-      const pct = u.size ? Math.round((u.used / u.size) * 100) : 0;
-      parts.push(`context ${fmtTokens(u.used)}/${fmtTokens(u.size)} (${pct}%)`);
-    } else if (u.used != null) {
-      parts.push(`context ${fmtTokens(u.used)}`);
+  if (usage) {
+    if (usage.used != null && usage.size != null) {
+      const pct = usage.size ? Math.round((usage.used / usage.size) * 100) : 0;
+      parts.push(`context ${fmtTokens(usage.used)}/${fmtTokens(usage.size)} (${pct}%)`);
+    } else if (usage.used != null) {
+      parts.push(`context ${fmtTokens(usage.used)}`);
     }
-    if (u.total_tokens != null) parts.push(`${fmtTokens(u.total_tokens)} tokens`);
-    if (u.cost_amount != null) parts.push(`${u.cost_currency || ""} ${u.cost_amount.toFixed(2)}`.trim());
+    if (usage.total_tokens != null) parts.push(`${fmtTokens(usage.total_tokens)} tokens`);
+    if (usage.cost_amount != null) parts.push(`${usage.cost_currency || ""} ${usage.cost_amount.toFixed(2)}`.trim());
   }
-  pane.usageEl.textContent = parts.join("  ·  ");
+  pane.usageEl.textContent = parts.join("  \u00b7  ");
   pane.usageEl.hidden = parts.length === 0;
 }
 
@@ -346,11 +351,11 @@ function renderModel(agentId) {
     select.hidden = true;
     return;
   }
-  select.replaceChildren(...available.map((m) => {
+  select.replaceChildren(...available.map((model) => {
     const option = document.createElement("option");
-    option.value = m.model_id;
-    option.textContent = m.name || m.model_id;
-    if (m.description) option.title = m.description;
+    option.value = model.model_id;
+    option.textContent = model.name || model.model_id;
+    if (model.description) option.title = model.description;
     return option;
   }));
   if (models.current) select.value = models.current;
@@ -361,12 +366,11 @@ function updateHead(agentId) {
   const pane = state.panes.get(agentId);
   const agent = state.agents.get(agentId);
   if (!pane || !agent) return;
-  pane.labelEl.textContent = `${agent.label}  ·  ${agent.backend || ""}`;
+  pane.labelEl.textContent = `${agent.label}  \u00b7  ${agent.backend || ""}`;
   const live = !!agent.live;
   const working = agent.state === "working" || agent.state === "starting";
   pane.stateEl.textContent = agent.state || "";
   pane.stateEl.className = "state" + (working ? " working" : "");
-  // A stored (non-live) session shows a Resume button instead of a composer.
   pane.resumeBtn.hidden = live;
   pane.composer.hidden = !live;
   pane.allowInput.checked = !!agent.always_allow;
@@ -392,7 +396,6 @@ function renderItem(agentId, item) {
     role.textContent = item.system ? "system" : item.role;
     node.appendChild(role);
     const body = document.createElement("div");
-    // User text is shown verbatim; everything the model emits is markdown.
     if (item.role === "user") {
       body.className = "content";
       body.textContent = item.text;
@@ -421,11 +424,11 @@ function renderItem(agentId, item) {
   if (item.kind === "permission") {
     const node = document.createElement("div");
     node.className = "permission" + (item.resolved ? " resolved" : "");
-    const q = document.createElement("div");
-    q.className = "q";
-    const tc = item.tool_call || {};
-    q.textContent = `Permission: ${tc.title || "tool call"}${tc.kind ? ` (${tc.kind})` : ""}`;
-    node.appendChild(q);
+    const question = document.createElement("div");
+    question.className = "q";
+    const toolCall = item.tool_call || {};
+    question.textContent = `Permission: ${toolCall.title || "tool call"}${toolCall.kind ? ` (${toolCall.kind})` : ""}`;
+    node.appendChild(question);
     const opts = document.createElement("div");
     opts.className = "options";
     for (const option of item.options) {
@@ -444,13 +447,10 @@ function renderItem(agentId, item) {
   return document.createElement("div");
 }
 
-// All sessions of this case, in stable insertion order (live and closed alike).
 function sessionIds() {
   return [...state.agents.keys()];
 }
 
-// The sidebar Sessions list is the source of truth for every session; the main
-// area mirrors only the open (live) ones as panes.
 function renderSessionList() {
   const list = el("session-list");
   if (!list) return;
@@ -465,8 +465,8 @@ function renderSessionList() {
     li.innerHTML =
       `<button class="open">${dot}<span class="name"></span>` +
       `<span class="session-meta">${meta}</span></button>` +
-      `<button class="rename" title="rename">✎</button>` +
-      `<button class="trash" title="delete session and history">🗑</button>`;
+      `<button class="rename" title="rename">&#x270E;</button>` +
+      `<button class="trash" title="delete session and history">&#x1F5D1;</button>`;
     li.querySelector(".name").textContent = agent.label;
     li.querySelector(".open").onclick = () => activateSession(agentId);
     li.querySelector(".rename").onclick = () => sessionRename(agentId);
@@ -475,7 +475,6 @@ function renderSessionList() {
   }
 }
 
-// Clicking a session focuses its pane (if open) or opens it (if closed).
 function activateSession(agentId) {
   const agent = state.agents.get(agentId);
   if (!agent) return;
@@ -489,8 +488,6 @@ function activateSession(agentId) {
   applyPaneVisibility();
 }
 
-// Mark the focused session in the sidebar and (if open) its pane, and show a
-// hint when nothing is open in the main area.
 function applyPaneVisibility() {
   for (const [agentId, pane] of state.panes) {
     pane.root.classList.toggle("focused", agentId === state.focusedAgent);
@@ -513,10 +510,9 @@ function focusSession(agentId) {
   if (li) li.scrollIntoView({ block: "nearest" });
 }
 
-// Focus moves between sessions on a case page, or between cases on home — the
-// same hotkeys, scoped to whatever the page shows.
 function focusStep(delta) {
   if (route.mode === "home") return focusCaseStep(delta);
+  if (route.mode === "projects") return focusProjectStep(delta);
   const ids = sessionIds();
   if (ids.length === 0) return;
   const current = ids.indexOf(state.focusedAgent);
@@ -550,6 +546,52 @@ function focusCaseStep(delta) {
   if (li) li.scrollIntoView({ block: "nearest" });
 }
 
+// --- project browser focus -------------------------------------------------
+function projectIds() {
+  return [...document.querySelectorAll("#project-list li")].map((li) => li.dataset.projectId);
+}
+
+function focusProject(projectId) {
+  state.focusedProject = projectId;
+  for (const li of document.querySelectorAll("#project-list li")) {
+    li.classList.toggle("focused", li.dataset.projectId === projectId);
+  }
+  if (projectId) renderProjectDetail(projectId);
+  else {
+    el("project-detail").hidden = true;
+    el("project-placeholder").hidden = false;
+  }
+}
+
+function focusProjectStep(delta) {
+  const ids = projectIds();
+  if (ids.length === 0) return;
+  const current = ids.indexOf(state.focusedProject);
+  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
+  focusProject(ids[next]);
+  const li = document.querySelector(`#project-list li[data-project-id="${CSS.escape(ids[next])}"]`);
+  if (li) li.scrollIntoView({ block: "nearest" });
+}
+
+function renderProjectDetail(projectId) {
+  const project = state.projects.find((entry) => entry.id === projectId);
+  if (!project) {
+    el("project-detail").hidden = true;
+    el("project-placeholder").hidden = false;
+    return;
+  }
+  el("project-placeholder").hidden = true;
+  el("init-prompt").hidden = true;
+  el("project-detail").hidden = false;
+  el("pd-name").textContent = project.name;
+  el("pd-path").textContent = project.path;
+  el("pd-meta").textContent = [
+    `${project.cases || 0} case${project.cases === 1 ? "" : "s"}`,
+    project.last_opened ? `opened ${new Date(project.last_opened).toLocaleString()}` : null,
+  ].filter(Boolean).join("  \u00b7  ");
+  el("pd-open").href = projectUrl(projectId);
+}
+
 // Session actions shared by buttons and hotkeys.
 function sessionRename(agentId) {
   const current = (state.agents.get(agentId) || {}).label || "";
@@ -571,25 +613,22 @@ function newSession() {
     send({ action: "add_agent", case_id: state.activeCase, backend: el("backend-select").value });
   }
 }
+
 async function newCase() {
   const title = prompt("New case title:", "Unnamed case");
   if (title === null) return;
-  const summary = await fetch("/api/cases", {
+  const summary = await fetch(`${apiBase()}/cases`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: title.trim() || "Unnamed case" }),
-  }).then((r) => r.json());
-  caseUrl(summary.case_id) && (location.href = caseUrl(summary.case_id));
-}
-
-function caseUrl(caseId) {
-  return `/case/${encodeURIComponent(caseId)}`;
+  }).then((response) => response.json());
+  if (summary.case_id) location.href = caseUrl(summary.case_id);
 }
 
 async function deleteCase(caseId, title) {
   if (!caseId) return;
   if (!confirm(`Delete case "${title || caseId}" and all its sessions? This cannot be undone.`)) return;
-  await fetch(`/api/cases/${encodeURIComponent(caseId)}`, { method: "DELETE" });
+  await fetch(`${apiBase()}/cases/${encodeURIComponent(caseId)}`, { method: "DELETE" });
   loadCases();
 }
 
@@ -599,9 +638,11 @@ function deleteFocusedCase() {
   deleteCase(state.focusedCase, title);
 }
 
-// Enter: open the focused case (home), or — on a case page — focus the open
-// session's composer, or open the focused session if it's closed.
 function openFocused() {
+  if (route.mode === "projects") {
+    if (state.focusedProject) location.href = projectUrl(state.focusedProject);
+    return;
+  }
   if (route.mode === "home") {
     if (state.focusedCase) location.href = caseUrl(state.focusedCase);
     return;
@@ -617,16 +658,18 @@ function openFocused() {
 }
 
 function runAction(action) {
-  const id = state.focusedAgent;
-  const agent = id && state.agents.get(id);
+  const agentId = state.focusedAgent;
+  const agent = agentId && state.agents.get(agentId);
   switch (action) {
     case "new_case": return newCase();
-    // "new" and "delete" reuse the same keys on both pages: on home they act on
-    // cases, on a case page on sessions.
     case "new_session": return isSessionPage() ? newSession() : newCase();
     case "delete_session": if (route.mode === "home") return deleteFocusedCase(); break;
-    case "home": return route.mode !== "home" ? (location.href = "/") : undefined;
-    case "scratch": return route.mode !== "scratch" ? (location.href = "/scratch") : undefined;
+    case "home":
+      if (route.projectId) return location.href = projectUrl(route.projectId);
+      return;
+    case "scratch":
+      if (route.projectId && route.mode !== "scratch") return location.href = scratchUrl();
+      return;
     case "focus_next": return focusStep(1);
     case "focus_prev": return focusStep(-1);
     case "open_focused": return openFocused();
@@ -634,18 +677,16 @@ function runAction(action) {
     case "cancel_turn": return cancelTurn();
     case "help": return toggleHelp();
   }
-  if (!isSessionPage() || !agent) return; // session actions need a focused session
+  if (!isSessionPage() || !agent) return;
   switch (action) {
-    case "rename_session": return sessionRename(id);
-    case "name_session": return send({ action: "name_agent", agent_id: id });
-    case "close_session": if (agent.live) send({ action: "close_agent", agent_id: id }); return;
-    case "delete_session": return sessionDelete(id);
-    case "toggle_allow": return sessionToggleAllow(id);
+    case "rename_session": return sessionRename(agentId);
+    case "name_session": return send({ action: "name_agent", agent_id: agentId });
+    case "close_session": if (agent.live) send({ action: "close_agent", agent_id: agentId }); return;
+    case "delete_session": return sessionDelete(agentId);
+    case "toggle_allow": return sessionToggleAllow(agentId);
   }
 }
 
-// Stop the focused session's running turn. Only ever the focused session — never
-// reaches for other sessions.
 function cancelTurn() {
   if (isSessionPage() && state.focusedAgent) {
     send({ action: "cancel", agent_id: state.focusedAgent });
@@ -664,7 +705,6 @@ function onKeydown(event) {
   if (event.key === "Escape") {
     if (!el("file-modal").hidden) return (el("file-modal").hidden = true);
     if (!el("hotkey-help").hidden) return toggleHelp();
-    // Leave the composer and return to keyboard navigation.
     if (isTyping()) return document.activeElement.blur();
   }
   if (isTyping()) return;
@@ -675,8 +715,8 @@ function onKeydown(event) {
 }
 
 async function loadHotkeys() {
-  const map = await fetch("/api/hotkeys").then((r) => r.json());
-  // A binding may be a single key or a list of keys.
+  if (!route.projectId) return; // no hotkeys on project browser
+  const map = await fetch(`${apiBase()}/hotkeys`).then((response) => response.json());
   state.hotkeyByKey = new Map();
   for (const [action, keys] of Object.entries(map)) {
     for (const key of Array.isArray(keys) ? keys : [keys]) state.hotkeyByKey.set(key, action);
@@ -694,21 +734,19 @@ function toggleHelp() {
   el("hotkey-help").hidden = !el("hotkey-help").hidden;
 }
 
-// Apply configurable session-column sizing as CSS variables.
 async function loadUi() {
-  const ui = await fetch("/api/ui").then((r) => r.json());
+  if (!route.projectId) return;
+  const ui = await fetch(`${apiBase()}/ui`).then((response) => response.json());
   const style = document.documentElement.style;
   if (ui.session_min_width) style.setProperty("--session-min-width", ui.session_min_width);
   if (ui.session_max_width) style.setProperty("--session-max-width", ui.session_max_width);
   state.widths = Array.isArray(ui.session_widths) ? ui.session_widths : [];
-  // A previously chosen width (this browser) wins over the configured default.
   const saved = localStorage.getItem("casebook.sessionWidth");
   const width = saved || ui.session_width;
   if (width) style.setProperty("--session-width", width);
   state.widthIndex = state.widths.indexOf(width);
 }
 
-// Cycle the session-column width through the configured list (resize hotkey).
 function cycleWidth() {
   if (!state.widths || state.widths.length === 0) return;
   state.widthIndex = (state.widthIndex + 1 + state.widths.length) % state.widths.length;
@@ -718,28 +756,89 @@ function cycleWidth() {
   toast(`Session width: ${width}`);
 }
 
-// --- cases (home page) ----------------------------------------------------
-// The sidebar is a compact title-only list; focusing a case shows its details in
-// the main view.
-async function loadCases() {
-  state.cases = await fetch("/api/cases").then((r) => r.json());
-  const list = el("case-list");
+// --- projects (project browser) -------------------------------------------
+async function loadProjects() {
+  state.projects = await fetch("/api/projects").then((response) => response.json());
+  const list = el("project-list");
   list.replaceChildren();
-  for (const c of state.cases) {
+  for (const project of state.projects) {
     const li = document.createElement("li");
-    li.dataset.caseId = c.case_id;
-    li.className = "case-item";
-    // A real link, so middle-/ctrl-click opens the case in a new browser tab; a
-    // plain click just focuses it (details show in the main view).
+    li.dataset.projectId = project.id;
+    li.className = "project-item";
     const link = document.createElement("a");
     link.className = "open";
-    link.href = caseUrl(c.case_id);
-    link.title = c.title;
-    link.textContent = c.title;
-    link.onclick = (e) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) return; // let the browser open a tab
-      e.preventDefault();
-      focusCase(c.case_id);
+    link.href = projectUrl(project.id);
+    link.title = project.path;
+    link.innerHTML = `<span class="project-name"></span><span class="project-path muted"></span>`;
+    link.querySelector(".project-name").textContent = project.name;
+    link.querySelector(".project-path").textContent = project.path;
+    link.onclick = (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault();
+      focusProject(project.id);
+    };
+    li.appendChild(link);
+    list.appendChild(li);
+  }
+  const ids = projectIds();
+  state.focusedProject = ids.includes(state.focusedProject) ? state.focusedProject : (ids[0] || null);
+  focusProject(state.focusedProject);
+}
+
+async function openProjectPath(path) {
+  if (!path.trim()) return;
+  const response = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: path.trim(), action: "open" }),
+  });
+  const data = await response.json();
+  if (response.ok) {
+    location.href = projectUrl(data.id);
+  } else if (data.error && data.error.includes("no casebook found")) {
+    // Show init prompt
+    el("project-detail").hidden = true;
+    el("project-placeholder").hidden = true;
+    el("init-prompt").hidden = false;
+    el("init-prompt-path").textContent = path.trim();
+    el("init-project").onclick = () => initProjectPath(path.trim());
+  } else {
+    toast(data.error || "Failed to open project", "error");
+  }
+}
+
+async function initProjectPath(path) {
+  const response = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, action: "init" }),
+  });
+  const data = await response.json();
+  if (response.ok) {
+    location.href = projectUrl(data.id);
+  } else {
+    toast(data.error || "Failed to initialize project", "error");
+  }
+}
+
+// --- cases (project home page) --------------------------------------------
+async function loadCases() {
+  state.cases = await fetch(`${apiBase()}/cases`).then((response) => response.json());
+  const list = el("case-list");
+  list.replaceChildren();
+  for (const caseEntry of state.cases) {
+    const li = document.createElement("li");
+    li.dataset.caseId = caseEntry.case_id;
+    li.className = "case-item";
+    const link = document.createElement("a");
+    link.className = "open";
+    link.href = caseUrl(caseEntry.case_id);
+    link.title = caseEntry.title;
+    link.textContent = caseEntry.title;
+    link.onclick = (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      event.preventDefault();
+      focusCase(caseEntry.case_id);
     };
     li.appendChild(link);
     list.appendChild(li);
@@ -751,7 +850,7 @@ async function loadCases() {
 
 let caseDetailToken = 0;
 async function renderCaseDetail(caseId) {
-  const summary = state.cases.find((c) => c.case_id === caseId);
+  const summary = state.cases.find((caseEntry) => caseEntry.case_id === caseId);
   if (!summary) {
     el("case-detail").hidden = true;
     el("placeholder").hidden = false;
@@ -766,27 +865,26 @@ async function renderCaseDetail(caseId) {
     summary.status,
     `${summary.sessions || 0} session${summary.sessions === 1 ? "" : "s"}`,
     summary.created ? new Date(summary.created).toLocaleString() : null,
-  ].filter(Boolean).join("  ·  ");
+  ].filter(Boolean).join("  \u00b7  ");
   el("cd-id").textContent = caseId;
-  el("cd-keywords").innerHTML = (summary.keywords || []).map((k) => `<span class="kw">${k}</span>`).join("");
+  el("cd-keywords").innerHTML = (summary.keywords || []).map((keyword) => `<span class="kw">${keyword}</span>`).join("");
   el("cd-files").innerHTML = "";
   el("cd-sessions").innerHTML = "";
-  // Enrich with files + sessions (drop the result if focus moved on).
   const token = ++caseDetailToken;
-  const detail = await fetch(`/api/cases/${encodeURIComponent(caseId)}`).then((r) => r.json()).catch(() => null);
+  const detail = await fetch(`${apiBase()}/cases/${encodeURIComponent(caseId)}`).then((response) => response.json()).catch(() => null);
   if (token !== caseDetailToken || !detail) return;
   if ((detail.files || []).length) {
-    el("cd-files").innerHTML = "<h4>Files</h4>" + detail.files.map((f) => `<span class="file">${f}</span>`).join("");
+    el("cd-files").innerHTML = "<h4>Files</h4>" + detail.files.map((filename) => `<span class="file">${filename}</span>`).join("");
   }
   if ((detail.agents || []).length) {
     el("cd-sessions").innerHTML = "<h4>Sessions</h4>" +
-      detail.agents.map((a) => `<div class="cd-session">${a.label} <span class="muted">(${a.live ? a.state : "closed"})</span></div>`).join("");
+      detail.agents.map((agent) => `<div class="cd-session">${agent.label} <span class="muted">(${agent.live ? agent.state : "closed"})</span></div>`).join("");
   }
 }
 
-// --- case page ------------------------------------------------------------
+// --- case page -------------------------------------------------------------
 async function openCaseView(caseId) {
-  const detail = await fetch(`/api/cases/${caseId}`).then((r) => r.json()).catch(() => null);
+  const detail = await fetch(`${apiBase()}/cases/${caseId}`).then((response) => response.json()).catch(() => null);
   el("case-title").textContent = (detail && detail.title) || caseId;
   document.title = `${(detail && detail.title) || caseId} — casebook`;
   renderFiles((detail && detail.files) || []);
@@ -804,7 +902,7 @@ function renderFiles(files) {
 }
 
 async function openFile(name) {
-  const text = await fetch(`/api/cases/${state.activeCase}/files/${encodeURIComponent(name)}`).then((r) => r.text());
+  const text = await fetch(`${apiBase()}/cases/${state.activeCase}/files/${encodeURIComponent(name)}`).then((response) => response.text());
   el("file-modal-name").textContent = name;
   const body = el("file-modal-content");
   if (/\.(md|markdown)$/i.test(name)) {
@@ -817,9 +915,9 @@ async function openFile(name) {
   el("file-modal").hidden = false;
 }
 
-// --- backends -------------------------------------------------------------
+// --- backends --------------------------------------------------------------
 async function loadBackends() {
-  const info = await fetch("/api/backends").then((r) => r.json());
+  const info = await fetch(`${apiBase()}/backends`).then((response) => response.json());
   const select = el("backend-select");
   select.replaceChildren(...info.backends.map((name) => {
     const option = document.createElement("option");
@@ -834,53 +932,94 @@ async function loadBackends() {
 async function promoteSession(agentId) {
   const title = prompt("Promote this session into a new case — title:", "Unnamed case");
   if (title === null) return;
-  const res = await fetch("/api/promote", {
+  const response = await fetch(`${apiBase()}/promote`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agent_id: agentId, title: title.trim() || "Unnamed case" }),
-  }).then((r) => r.json()).catch(() => null);
-  if (res && res.case_id) location.href = caseUrl(res.case_id);
+  }).then((response) => response.json()).catch(() => null);
+  if (response && response.case_id) location.href = caseUrl(response.case_id);
 }
 
 function applyRoute() {
-  const home = route.mode === "home";
-  const scratch = route.mode === "scratch";
-  document.body.classList.toggle("home", home);
-  document.body.classList.toggle("case", !home);
-  el("cases-nav").hidden = !home;
-  el("case-nav").hidden = home;
-  el("files-section").hidden = !route.caseId || scratch; // scratch has no files
-  el("agents").hidden = home;
-  el("case-detail").hidden = true; // shown on the home page when a case is focused
-  el("placeholder").hidden = !home;
-  el("back-cases").hidden = home;
-  // The logo stays in the top bar on every page; case/scratch pages add the back
-  // button + title.
-  el("case-title").hidden = home;
+  const isProjects = route.mode === "projects";
+  const isHome = route.mode === "home";
+  const isScratch = route.mode === "scratch";
+  const isCase = route.mode === "case";
+  const hasProject = !!route.projectId;
+
+  document.body.classList.toggle("projects", isProjects);
+  document.body.classList.toggle("home", isHome);
+  document.body.classList.toggle("case", isCase || isScratch);
+
+  // Sidebar sections
+  el("projects-nav").hidden = !isProjects;
+  el("cases-nav").hidden = !isHome;
+  el("case-nav").hidden = !(isCase || isScratch);
+  el("files-section").hidden = !route.caseId || isScratch;
+
+  // Main sections
+  el("project-detail").hidden = true;
+  el("project-placeholder").hidden = !isProjects;
+  el("init-prompt").hidden = true;
+  el("agents").hidden = !(isCase || isScratch);
+  el("case-detail").hidden = true;
+  el("placeholder").hidden = !isHome;
+
+  // Top bar
+  el("back-projects").hidden = !hasProject;
+  el("back-cases").hidden = !(isCase || isScratch);
+  if (hasProject) {
+    el("back-cases").href = projectUrl(route.projectId);
+  }
+  el("case-title").hidden = isProjects || isHome;
+
+  // Scratch link
+  const scratchLink = el("scratch-link");
+  if (scratchLink && hasProject) {
+    scratchLink.href = scratchUrl();
+  }
+
+  // Connection indicator: hide on project browser (no websocket)
+  el("connection").hidden = isProjects;
 }
 
 // --- wiring ---------------------------------------------------------------
 el("add-agent").onclick = newSession;
 el("new-case").onclick = newCase;
 el("file-modal-close").onclick = () => (el("file-modal").hidden = true);
-el("file-modal").onclick = (e) => {
-  if (e.target.id === "file-modal") el("file-modal").hidden = true;
+el("file-modal").onclick = (event) => {
+  if (event.target.id === "file-modal") el("file-modal").hidden = true;
 };
 el("hotkey-help-close").onclick = toggleHelp;
 el("hotkey-hint").onclick = toggleHelp;
+el("open-project").onclick = () => openProjectPath(el("project-path-input").value);
+el("project-path-input").onkeydown = (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    openProjectPath(el("project-path-input").value);
+  }
+};
 document.addEventListener("keydown", onKeydown);
 
 applyRoute();
-loadHotkeys();
-loadUi();
-connect();
-if (route.mode === "home") {
+if (route.mode === "projects") {
+  loadProjects();
+} else if (route.mode === "home") {
+  loadHotkeys();
+  loadUi();
+  connect();
   loadCases();
 } else if (route.mode === "scratch") {
+  loadHotkeys();
+  loadUi();
+  connect();
   loadBackends();
   el("case-title").textContent = "Scratch sessions";
   document.title = "Scratch — casebook";
 } else {
+  loadHotkeys();
+  loadUi();
+  connect();
   loadBackends();
   openCaseView(route.caseId);
 }

@@ -9,21 +9,35 @@
   <body>
     <header id="topbar">
       <a class="brand" href="/" title="casebook"><img src="/static/logo.png" alt="casebook" /></a>
-      <a id="back-cases" href="/" hidden>← Cases</a>
+      <a id="back-projects" href="/" hidden>Projects</a>
+      <a id="back-cases" href="#" hidden>← Cases</a>
       <span id="case-title"></span>
-      <button id="hotkey-hint" title="keyboard shortcuts">⌨</button>
+      <button id="hotkey-hint" title="keyboard shortcuts">&#x2328;</button>
       <span id="connection" class="disconnected">connecting…</span>
     </header>
     <div id="layout">
       <aside id="sidebar">
-        <div id="cases-nav">
-          <a id="scratch-link" href="/scratch">⚡ Scratch sessions</a>
+        <!-- Project browser sidebar -->
+        <div id="projects-nav" hidden>
+          <div class="sidebar-head">
+            <h2>Projects</h2>
+          </div>
+          <ul id="project-list"></ul>
+          <div class="sidebar-add-project">
+            <input id="project-path-input" type="text" placeholder="Project directory path…" />
+            <button id="open-project" title="open project">Open</button>
+          </div>
+        </div>
+        <!-- Cases sidebar (project home) -->
+        <div id="cases-nav" hidden>
+          <a id="scratch-link" href="#">&#x26A1; Scratch sessions</a>
           <div class="sidebar-head">
             <h2>Cases</h2>
             <button id="new-case" title="new case">+ case</button>
           </div>
           <ul id="case-list"></ul>
         </div>
+        <!-- Case/scratch sidebar -->
         <div id="case-nav" hidden>
           <div class="sidebar-head">
             <h2>Sessions</h2>
@@ -38,6 +52,17 @@
         </div>
       </aside>
       <main id="workspace">
+        <!-- Project browser main -->
+        <section id="project-detail" hidden>
+          <h1 id="pd-name"></h1>
+          <div id="pd-path" class="muted"></div>
+          <div id="pd-meta" class="muted"></div>
+          <div class="cd-actions">
+            <a id="pd-open" href="#">Open project &#x2192;</a>
+          </div>
+        </section>
+        <p id="project-placeholder" hidden>Focus a project in the sidebar to see its details, or add one below.</p>
+        <!-- Case browser main (project home) -->
         <section id="agents" hidden>
           <div id="agent-panes"></div>
           <p id="no-open-sessions" hidden>No open sessions — add one with + or open a closed session from the sidebar.</p>
@@ -50,11 +75,18 @@
           <div id="cd-sessions"></div>
           <div id="cd-id" class="muted"></div>
           <div class="cd-actions">
-            <a id="cd-open" href="#">Open case →</a>
+            <a id="cd-open" href="#">Open case &#x2192;</a>
             <button id="cd-delete">Delete case</button>
           </div>
         </section>
-        <p id="placeholder">Focus a case in the sidebar to see its details.</p>
+        <p id="placeholder" hidden>Focus a case in the sidebar to see its details.</p>
+        <!-- Init prompt (shown when an opened path has no casebook) -->
+        <section id="init-prompt" hidden>
+          <h2>No casebook found</h2>
+          <p id="init-prompt-path" class="muted"></p>
+          <p>This directory does not have a casebook yet.</p>
+          <button id="init-project">Initialize casebook</button>
+        </section>
       </main>
     </div>
 
@@ -62,14 +94,14 @@
 
     <div id="hotkey-help" hidden>
       <div class="modal-body">
-        <header><span>Keyboard shortcuts</span><button id="hotkey-help-close">×</button></header>
+        <header><span>Keyboard shortcuts</span><button id="hotkey-help-close">&#xd7;</button></header>
         <div id="hotkey-help-body"></div>
       </div>
     </div>
 
     <div id="file-modal" hidden>
       <div class="modal-body">
-        <header><span id="file-modal-name"></span><button id="file-modal-close">×</button></header>
+        <header><span id="file-modal-name"></span><button id="file-modal-close">&#xd7;</button></header>
         <div id="file-modal-content" class="filebody"></div>
       </div>
     </div>

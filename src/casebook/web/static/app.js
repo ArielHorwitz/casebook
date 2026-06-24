@@ -438,7 +438,7 @@ function renderItem(agentId, item) {
       opts.appendChild(btn);
     }
     const deny = document.createElement("button");
-    deny.textContent = "Deny";
+    deny.textContent = "Cancel";
     deny.onclick = () => send({ action: "permission", request_id: item.request_id, option_id: null });
     opts.appendChild(deny);
     node.appendChild(opts);

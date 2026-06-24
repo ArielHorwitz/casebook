@@ -92,7 +92,7 @@ class CaseCoordinator:
         self._usage: dict[str, dict] = {}
         # Which sessions are currently busy, for console activity reporting.
         self._busy_ids: set[str] = set()
-        self._permissions: dict[str, asyncio.Future] = {}
+        self._permissions: dict[str, tuple[asyncio.Future, Optional[str]]] = {}
         self._watchers: dict[str, tuple[asyncio.Task, asyncio.Event]] = {}
 
     def load_persisted(self) -> None:
@@ -598,7 +598,7 @@ class CaseCoordinator:
                 return chosen
         request_id = uuid.uuid4().hex
         future: asyncio.Future = asyncio.get_event_loop().create_future()
-        self._permissions[request_id] = future
+        self._permissions[request_id] = (future, payload.get("agent_id"))
         self._emit({"type": "permission_request", "request_id": request_id, **payload})
         try:
             return await future
@@ -606,10 +606,15 @@ class CaseCoordinator:
             self._permissions.pop(request_id, None)
 
     def resolve_permission(self, request_id: str, option_id: Optional[str]) -> None:
-        future = self._permissions.get(request_id)
-        if future is not None and not future.done():
-            future.set_result(option_id)
-        self._emit({"type": "permission_resolved", "request_id": request_id})
+        entry = self._permissions.get(request_id)
+        if entry is not None:
+            future, agent_id = entry
+            if not future.done():
+                future.set_result(option_id)
+        else:
+            agent_id = None
+        self._emit({"type": "permission_resolved", "request_id": request_id,
+                     "agent_id": agent_id})
 
     # --- filesystem watching --------------------------------------------
     def _watch_case(self, case: cases.Case) -> None:

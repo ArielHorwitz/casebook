@@ -62,7 +62,7 @@ DEFAULT_HOTKEYS = {
     "focus_prev": ["[", "ArrowLeft", "ArrowUp"],
     "open_focused": "Enter",
     "rename_session": "r",
-    "name_session": "g",
+    "autoname_session": "g",
     "close_session": "x",
     "delete_session": "d",
     "toggle_allow": "a",

@@ -247,7 +247,7 @@ function buildPane(agent) {
         <select class="model" title="model" hidden></select>
         <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
         <button class="rename" title="rename session">&#x270E;</button>
-        <button class="autoname" title="name session with the model">&#x2728;</button>
+        <button class="autoname" title="autoname session">&#x2728;</button>
         <button class="promote" title="promote into a new case" hidden>&#x2191; case</button>
         <button class="resume" hidden>Resume</button>
         <button class="close" title="close session (keep history)">&#xd7;</button>
@@ -680,7 +680,7 @@ function runAction(action) {
   if (!isSessionPage() || !agent) return;
   switch (action) {
     case "rename_session": return sessionRename(agentId);
-    case "name_session": return send({ action: "name_agent", agent_id: agentId });
+    case "autoname_session": return send({ action: "name_agent", agent_id: agentId });
     case "close_session": if (agent.live) send({ action: "close_agent", agent_id: agentId }); return;
     case "delete_session": return sessionDelete(agentId);
     case "toggle_allow": return sessionToggleAllow(agentId);

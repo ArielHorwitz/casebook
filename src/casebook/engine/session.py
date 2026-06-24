@@ -113,6 +113,12 @@ class AgentSession:
                 *args,
                 cwd=str(self.project_root),
                 env=environment,
+                # asyncio's default StreamReader limit (64 KiB) is far too
+                # small for JSON-RPC messages carrying file contents —
+                # exceeding it crashes the connection. 100 MiB is well beyond
+                # any realistic single message while still capping a buggy
+                # subprocess before it can exhaust memory.
+                transport_kwargs={"limit": 100 * 1024 * 1024},
             )
         )
         self._conn = conn

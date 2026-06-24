@@ -81,7 +81,13 @@ async def one_shot(
     async with AsyncExitStack() as stack:
         conn, _process = await stack.enter_async_context(
             spawn_agent_process(
-                client, command, *args, cwd=str(project_root), env=environment
+                client,
+                command,
+                *args,
+                cwd=str(project_root),
+                env=environment,
+                # See session.py for rationale on this limit.
+                transport_kwargs={"limit": 100 * 1024 * 1024},
             )
         )
         await conn.initialize(

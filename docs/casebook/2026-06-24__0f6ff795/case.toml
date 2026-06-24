@@ -1,0 +1,4 @@
+title = "LimitOverrunError: asyncio StreamReader buffer too small for large JSON-RPC messages"
+status = "closed"
+created = "2026-06-24T16:28:27.211411"
+keywords = ["asyncio", "StreamReader", "LimitOverrunError", "JSON-RPC", "stdio", "subprocess"]

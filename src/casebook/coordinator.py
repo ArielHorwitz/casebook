@@ -502,6 +502,9 @@ class CaseCoordinator:
         name = _clean_name(reply)
         if name:
             self.rename_agent(agent_id, name)
+            self._emit({"type": "notice", "agent_id": agent_id,
+                        "case_id": agent["case_id"],
+                        "message": f"named: {name}"})
 
     def _transcript_text(self, agent_id: str, limit: int = 6000) -> str:
         """Plain user/agent text of a session, most recent `limit` characters."""

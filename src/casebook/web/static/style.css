@@ -391,6 +391,13 @@ body {
 /* User text keeps source whitespace; rendered markdown flows normally. */
 .bubble .content { white-space: normal; }
 .bubble.user .content { white-space: pre-wrap; }
+.bubble-actions { display: none; margin-top: 4px; gap: 4px; }
+.bubble.user:hover .bubble-actions { display: flex; }
+.bubble-actions button {
+  font-size: 11px; padding: 1px 6px; border: 1px solid var(--muted); border-radius: 4px;
+  background: transparent; color: var(--muted); cursor: pointer; opacity: 0.7;
+}
+.bubble-actions button:hover { opacity: 1; background: rgba(255,255,255,0.08); }
 
 .tool {
   background: var(--tool);

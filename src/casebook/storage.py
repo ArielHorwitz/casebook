@@ -65,6 +65,15 @@ class SessionStore:
             new.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(old), str(new))
 
+    def rewrite_transcript(self, case_id: str, agent_id: str, events: list[dict]) -> None:
+        """Replace the transcript file with the given events (for revert)."""
+        session_dir = self._session_dir(case_id, agent_id)
+        session_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = session_dir.joinpath(TRANSCRIPT_FILENAME)
+        tmp = transcript_path.with_suffix(".tmp")
+        tmp.write_text("".join(json.dumps(event) + "\n" for event in events))
+        tmp.replace(transcript_path)
+
     def load_all(self) -> list[StoredSession]:
         """Every persisted session, oldest case/agent directory first."""
         if not self.root.exists():

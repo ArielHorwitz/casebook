@@ -416,6 +416,100 @@ class CaseCoordinator:
         self._emit({"type": "case_created", **self._case_summary(case)})
         return new_cid
 
+    async def revert_agent(self, agent_id: str, event_index: int) -> None:
+        """Revert a session's transcript to just before `event_index`.
+
+        The event at `event_index` must be a user message — everything from that
+        point onward is discarded. If the session is live, the ACP subprocess is
+        torn down (its history is now stale); the session becomes stored and can
+        be resumed, which re-sends the truncated transcript as context.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise cases.CasebookError(f"no such session: {agent_id}")
+        transcript = self._transcripts.get(agent_id, [])
+        if event_index < 0 or event_index >= len(transcript):
+            raise cases.CasebookError(f"event_index {event_index} out of range")
+        target = transcript[event_index]
+        if target.get("type") != "message" or target.get("role") != "user":
+            raise cases.CasebookError("revert target must be a user message")
+        # Tear down the live ACP session — its history no longer matches.
+        if agent.get("live"):
+            session = self.sessions.pop(agent_id)
+            if session is not None:
+                await session.stop()
+            agent["state"] = "stored"
+            agent["live"] = False
+            self._models.pop(agent_id, None)
+            self._pending_context.pop(agent_id, None)
+        # Force a fresh ACP session on resume — the old one has stale history.
+        self._acp_ids[agent_id] = None
+        # Truncate in memory and rewrite on disk.
+        truncated = transcript[:event_index]
+        self._transcripts[agent_id] = truncated
+        case_id = agent["case_id"]
+        if agent_id in self._persisted:
+            self.store.rewrite_transcript(case_id, agent_id, truncated)
+            self._persist_meta(agent_id)
+        self._emit({"type": "agent_updated", **agent})
+        self._emit({"type": "transcript_reset", "agent_id": agent_id,
+                     "case_id": case_id, "transcript": truncated})
+
+    async def fork_agent(self, agent_id: str, event_index: Optional[int] = None) -> str:
+        """Duplicate a session (optionally truncated) into a new stored session.
+
+        If `event_index` is given, the fork's transcript is truncated to
+        events[:event_index] (same semantics as revert — everything from that
+        user message onward is excluded). The new session starts in stored state.
+        """
+        source = self._agents.get(agent_id)
+        if source is None:
+            raise cases.CasebookError(f"no such session: {agent_id}")
+        transcript = list(self._transcripts.get(agent_id, []))
+        if event_index is not None:
+            if event_index < 0 or event_index > len(transcript):
+                raise cases.CasebookError(f"event_index {event_index} out of range")
+            transcript = transcript[:event_index]
+        case_id = source["case_id"]
+        new_agent_id = self.sessions.new_agent_id()
+        label = f"{source['label']} (fork)"
+        now = _now_iso()
+        # Register in coordinator state.
+        self._agents[new_agent_id] = {
+            "agent_id": new_agent_id,
+            "case_id": case_id,
+            "label": label,
+            "backend": source["backend"],
+            "model": source.get("model"),
+            "always_allow": source.get("always_allow", False),
+            "state": "stored",
+            "live": False,
+        }
+        self._transcripts[new_agent_id] = transcript
+        self._acp_ids[new_agent_id] = None  # fresh session on resume
+        self._created[new_agent_id] = now
+        self._auto_named[new_agent_id] = False  # custom name, always persist
+        self._persisted.add(new_agent_id)
+        # Write to disk.
+        self.store.write_meta({
+            "agent_id": new_agent_id,
+            "case_id": case_id,
+            "label": label,
+            "backend": source["backend"],
+            "model": source.get("model"),
+            "always_allow": source.get("always_allow", False),
+            "named": True,
+            "acp_session_id": None,
+            "created": now,
+            "last_active": now,
+        })
+        self.store.rewrite_transcript(case_id, new_agent_id, transcript)
+        self._emit({"type": "agent_added", **self._agents[new_agent_id]})
+        # Send the full transcript so the frontend can display it immediately.
+        self._emit({"type": "transcript_reset", "agent_id": new_agent_id,
+                     "case_id": case_id, "transcript": transcript})
+        return new_agent_id
+
     async def _apply_models(self, agent_id: str, session: AgentSession) -> None:
         """Apply the configured default-model preference and publish the model list."""
         desired = _match_model(self.config.default_model, session.available_models)

@@ -44,6 +44,7 @@ const state = {
   focusedProject: null,
   cases: [],
   projects: [],
+  eventCounts: new Map(),
   hotkeyByKey: new Map(),
   widths: [],
   widthIndex: -1,
@@ -127,6 +128,8 @@ function handleEvent(event) {
         return applyToTranscript(event);
       }
       return toast(event.message);
+    case "transcript_reset":
+      return applyTranscriptReset(event);
     case "files_changed":
       if (event.case_id === state.activeCase) renderFiles(event.files);
       return;
@@ -138,6 +141,7 @@ function handleEvent(event) {
 function applySnapshot(snapshot) {
   state.agents.clear();
   state.transcripts.clear();
+  state.eventCounts.clear();
   state.models.clear();
   for (const [agentId, pane] of state.panes) pane.root.remove();
   state.panes.clear();
@@ -184,6 +188,7 @@ function removeAgent(agentId) {
   removePaneOnly(agentId);
   state.agents.delete(agentId);
   state.transcripts.delete(agentId);
+  state.eventCounts.delete(agentId);
   state.models.delete(agentId);
   state.usage.delete(agentId);
   if (state.focusedAgent === agentId) state.focusedAgent = sessionIds()[0] || null;
@@ -204,14 +209,17 @@ function applyToTranscript(event) {
   const items = state.transcripts.get(agentId);
   if (!items) return;
 
+  const eventIndex = state.eventCounts.get(agentId) || 0;
+
   if (event.type === "message") {
     const last = items[items.length - 1];
     const streaming = event.role !== "user";
     if (streaming && last && last.kind === "message" && last.role === event.role && last.streaming) {
       last.text += event.text;
     } else {
-      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system });
+      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system, eventIndex });
     }
+    state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "tool_call") {
     const existing = items.find((item) => item.kind === "tool" && item.id === event.tool_call_id);
     if (existing) {
@@ -221,8 +229,10 @@ function applyToTranscript(event) {
     } else {
       items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
     }
+    state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "notice") {
     items.push({ kind: "notice", message: event.message });
+    state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "permission_request") {
     items.push({ kind: "permission", request_id: event.request_id, tool_call: event.tool_call, options: event.options, resolved: false });
   } else if (event.type === "permission_resolved") {
@@ -232,6 +242,30 @@ function applyToTranscript(event) {
     return;
   }
   renderTranscript(agentId);
+}
+
+function applyTranscriptReset(event) {
+  const agentId = event.agent_id;
+  if (!state.transcripts.has(agentId)) state.transcripts.set(agentId, []);
+  const items = [];
+  const rawEvents = event.transcript || [];
+  for (let index = 0; index < rawEvents.length; index++) {
+    applyRawEventToItems(items, rawEvents[index], index);
+  }
+  state.transcripts.set(agentId, items);
+  state.eventCounts.set(agentId, rawEvents.length);
+  renderTranscript(agentId);
+  renderSessionList();
+}
+
+function applyRawEventToItems(items, event, eventIndex) {
+  if (event.type === "message") {
+    items.push({ kind: "message", role: event.role, text: event.text, streaming: false, system: event.system, eventIndex });
+  } else if (event.type === "tool_call") {
+    items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
+  } else if (event.type === "notice") {
+    items.push({ kind: "notice", message: event.message });
+  }
 }
 
 // --- panes / rendering ----------------------------------------------------
@@ -248,6 +282,7 @@ function buildPane(agent) {
         <label class="allow" title="auto-allow this session's permission requests"><input type="checkbox" /> allow</label>
         <button class="rename" title="rename session">&#x270E;</button>
         <button class="autoname" title="autoname session">&#x2728;</button>
+        <button class="fork" title="fork (duplicate) this session">&#x2442;</button>
         <button class="promote" title="promote into a new case" hidden>&#x2191; case</button>
         <button class="resume" hidden>Resume</button>
         <button class="close" title="close session (keep history)">&#xd7;</button>
@@ -284,6 +319,7 @@ function buildPane(agent) {
   allowInput.onchange = () => send({ action: "set_always_allow", agent_id: agent.agent_id, value: allowInput.checked });
   root.querySelector(".rename").onclick = () => sessionRename(agent.agent_id);
   root.querySelector(".autoname").onclick = () => send({ action: "name_agent", agent_id: agent.agent_id });
+  root.querySelector(".fork").onclick = () => send({ action: "fork_agent", agent_id: agent.agent_id });
   const modelSelect = root.querySelector(".model");
   modelSelect.onchange = () => send({ action: "set_model", agent_id: agent.agent_id, model_id: modelSelect.value });
   root.querySelector(".resume").onclick = () => send({ action: "resume_agent", agent_id: agent.agent_id });
@@ -404,6 +440,31 @@ function renderItem(agentId, item) {
       body.innerHTML = renderMarkdown(item.text);
     }
     node.appendChild(body);
+    if (item.role === "user" && !item.system && item.eventIndex != null) {
+      const actions = document.createElement("div");
+      actions.className = "bubble-actions";
+      const revertBtn = document.createElement("button");
+      revertBtn.className = "revert";
+      revertBtn.title = "revert to before this message";
+      revertBtn.textContent = "\u21A9 revert";
+      revertBtn.onclick = (event) => {
+        event.stopPropagation();
+        if (confirm("Revert session to before this message? Everything from here onward will be removed.")) {
+          send({ action: "revert_agent", agent_id: agentId, event_index: item.eventIndex });
+        }
+      };
+      const forkBtn = document.createElement("button");
+      forkBtn.className = "fork-from";
+      forkBtn.title = "fork session from before this message";
+      forkBtn.textContent = "\u2442 fork";
+      forkBtn.onclick = (event) => {
+        event.stopPropagation();
+        send({ action: "fork_agent", agent_id: agentId, event_index: item.eventIndex });
+      };
+      actions.appendChild(revertBtn);
+      actions.appendChild(forkBtn);
+      node.appendChild(actions);
+    }
     return node;
   }
   if (item.kind === "tool") {

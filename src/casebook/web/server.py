@@ -242,6 +242,10 @@ def _dispatch(coordinator: CaseCoordinator, action: dict) -> None:
         coordinator.resolve_permission(action["request_id"], action.get("option_id"))
     elif name == "set_always_allow":
         coordinator.set_always_allow(action["agent_id"], action.get("value", False))
+    elif name == "revert_agent":
+        _spawn(coordinator.revert_agent(action["agent_id"], action["event_index"]))
+    elif name == "fork_agent":
+        _spawn(coordinator.fork_agent(action["agent_id"], action.get("event_index")))
 
 
 def _spawn(coro) -> None:

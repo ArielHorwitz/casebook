@@ -554,6 +554,9 @@ class CaseCoordinator:
         self._auto_named[agent_id] = False  # a custom name makes it worth keeping
         self._persist_meta(agent_id)
         self._emit({"type": "agent_updated", **agent})
+        self._emit({"type": "notice", "agent_id": agent_id,
+                    "case_id": agent["case_id"],
+                    "message": f"named: {label}"})
 
     async def name_agent(self, agent_id: str) -> None:
         """Ask the model to name a session from its transcript (configurable prompt)."""
@@ -584,7 +587,7 @@ class CaseCoordinator:
             return
         prompt = f"{self.config.naming_prompt}\n\n--- transcript ---\n{transcript_text}"
         self._emit({"type": "notice", "agent_id": agent_id,
-                    "case_id": agent["case_id"], "message": "naming session…"})
+                    "case_id": agent["case_id"], "message": "autonaming session…"})
         try:
             reply = await oneshot.one_shot(
                 backend, self.project_root, prompt, model=self.config.naming_model
@@ -597,9 +600,6 @@ class CaseCoordinator:
         name = _clean_name(reply)
         if name:
             self.rename_agent(agent_id, name)
-            self._emit({"type": "notice", "agent_id": agent_id,
-                        "case_id": agent["case_id"],
-                        "message": f"named: {name}"})
 
     def _transcript_text(self, agent_id: str, limit: int = 6000) -> str:
         """Plain user/agent text of a session, most recent `limit` characters."""

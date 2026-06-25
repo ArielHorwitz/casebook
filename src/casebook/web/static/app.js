@@ -50,6 +50,7 @@ const state = {
   hotkeyByKey: new Map(),
   widths: [],
   widthIndex: -1,
+  prevUsage: new Map(),  // agent_id → {input_tokens, output_tokens, total_tokens} for computing deltas
 };
 
 const el = (id) => document.getElementById(id);
@@ -123,7 +124,8 @@ function handleEvent(event) {
         if (event[key] != null) usage[key] = event[key];
       }
       state.usage.set(event.agent_id, usage);
-      return renderUsage(event.agent_id);
+      renderUsage(event.agent_id);
+      return applyToTranscript(event);
     }
     case "notice":
       if (event.agent_id && state.transcripts.has(event.agent_id)) {
@@ -145,6 +147,7 @@ function applySnapshot(snapshot) {
   state.transcripts.clear();
   state.eventCounts.clear();
   state.models.clear();
+  state.prevUsage.clear();
   for (const [agentId, pane] of state.panes) pane.root.remove();
   state.panes.clear();
   for (const agent of snapshot.agents) upsertAgent(agent);
@@ -196,10 +199,48 @@ function removeAgent(agentId) {
   state.eventCounts.delete(agentId);
   state.models.delete(agentId);
   state.usage.delete(agentId);
+  state.prevUsage.delete(agentId);
   if (state.sidebarFocusedAgent === agentId) state.sidebarFocusedAgent = sessionIds()[0] || null;
   if (state.paneFocusedAgent === agentId) state.paneFocusedAgent = paneIds()[0] || null;
   renderSessionList();
   applyFocusVisibility();
+}
+
+function attachUsageToLastAgentMessage(agentId, event) {
+  const items = state.transcripts.get(agentId);
+  if (!items) return;
+  // Walk backward to find the last agent message to attach usage to.
+  let target = null;
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (items[index].kind === "message" && items[index].role === "agent") {
+      target = items[index];
+      break;
+    }
+  }
+  if (!target) return;
+  // Compute deltas from previous cumulative totals.
+  const prev = state.prevUsage.get(agentId) || {};
+  const usage = {};
+  if (event.input_tokens != null) {
+    usage.input_tokens = event.input_tokens;
+    usage.delta_input = prev.input_tokens != null ? event.input_tokens - prev.input_tokens : null;
+  }
+  if (event.output_tokens != null) {
+    usage.output_tokens = event.output_tokens;
+    usage.delta_output = prev.output_tokens != null ? event.output_tokens - prev.output_tokens : null;
+  }
+  if (event.used != null) usage.used = event.used;
+  if (event.size != null) usage.size = event.size;
+  if (event.cost_amount != null) usage.cost_amount = event.cost_amount;
+  if (event.cost_currency != null) usage.cost_currency = event.cost_currency;
+  // Merge: multiple usage events per turn (streaming + post-prompt) contribute different fields.
+  target.usage = Object.assign(target.usage || {}, usage);
+  // Update previous cumulative totals for next delta computation.
+  const updated = { ...prev };
+  if (event.input_tokens != null) updated.input_tokens = event.input_tokens;
+  if (event.output_tokens != null) updated.output_tokens = event.output_tokens;
+  if (event.total_tokens != null) updated.total_tokens = event.total_tokens;
+  state.prevUsage.set(agentId, updated);
 }
 
 function applyToTranscript(event) {
@@ -247,6 +288,8 @@ function applyToTranscript(event) {
       perm.resolved = true;
       perm.chosen_option_id = event.option_id ?? null;
     }
+  } else if (event.type === "usage") {
+    attachUsageToLastAgentMessage(agentId, event);
   } else {
     return;
   }
@@ -265,8 +308,9 @@ function applyTranscriptReset(event) {
   if (!state.transcripts.has(agentId)) state.transcripts.set(agentId, []);
   const items = [];
   const rawEvents = event.transcript || [];
+  state.prevUsage.delete(agentId);
   for (let index = 0; index < rawEvents.length; index++) {
-    applyRawEventToItems(items, rawEvents[index], index);
+    applyRawEventToItems(agentId, items, rawEvents[index], index);
   }
   state.transcripts.set(agentId, items);
   state.eventCounts.set(agentId, rawEvents.length);
@@ -274,13 +318,21 @@ function applyTranscriptReset(event) {
   renderSessionList();
 }
 
-function applyRawEventToItems(items, event, eventIndex) {
+function applyRawEventToItems(agentId, items, event, eventIndex) {
   if (event.type === "message") {
     items.push({ kind: "message", role: event.role, text: event.text, streaming: false, system: event.system, eventIndex, ts: event.ts });
   } else if (event.type === "tool_call") {
     items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
   } else if (event.type === "notice") {
     items.push({ kind: "notice", message: event.message, level: event.level || "info" });
+  } else if (event.type === "usage") {
+    // During replay, attach to the last agent message in the items array built so far.
+    // Reuse the same delta logic via attachUsageToLastAgentMessage — it reads from
+    // state.transcripts, so temporarily set the items we're building.
+    const prev = state.transcripts.get(agentId);
+    state.transcripts.set(agentId, items);
+    attachUsageToLastAgentMessage(agentId, event);
+    if (prev !== undefined) state.transcripts.set(agentId, prev);
   }
 }
 
@@ -494,6 +546,28 @@ function renderItem(agentId, item) {
       actions.appendChild(revertBtn);
       actions.appendChild(forkBtn);
       node.appendChild(actions);
+    }
+    if (item.usage) {
+      const usageEl = document.createElement("div");
+      usageEl.className = "bubble-usage";
+      const parts = [];
+      if (item.usage.delta_output != null) parts.push(`+${fmtTokens(item.usage.delta_output)} out`);
+      else if (item.usage.output_tokens != null) parts.push(`${fmtTokens(item.usage.output_tokens)} out`);
+      if (item.usage.delta_input != null) parts.push(`${fmtTokens(item.usage.delta_input)} in`);
+      else if (item.usage.input_tokens != null) parts.push(`${fmtTokens(item.usage.input_tokens)} in`);
+      if (item.usage.used != null && item.usage.size != null) {
+        const pct = item.usage.size ? Math.round((item.usage.used / item.usage.size) * 100) : 0;
+        parts.push(`ctx ${fmtTokens(item.usage.used)}/${fmtTokens(item.usage.size)} (${pct}%)`);
+      } else if (item.usage.used != null) {
+        parts.push(`ctx ${fmtTokens(item.usage.used)}`);
+      }
+      if (item.usage.cost_amount != null) {
+        parts.push(`${item.usage.cost_currency || ""} ${item.usage.cost_amount.toFixed(2)}`.trim());
+      }
+      if (parts.length > 0) {
+        usageEl.textContent = parts.join("  \u00b7  ");
+        node.appendChild(usageEl);
+      }
     }
     return node;
   }

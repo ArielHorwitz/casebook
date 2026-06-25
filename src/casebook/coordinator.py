@@ -25,7 +25,7 @@ from .engine.session import AgentSession, SessionManager
 
 # Event types worth replaying to a browser that connects/reloads mid-case, and
 # worth persisting so a session survives a restart.
-_REPLAYABLE = {"message", "tool_call", "notice", "plan"}
+_REPLAYABLE = {"message", "tool_call", "notice", "plan", "usage"}
 
 # Reserved case id for caseless ("scratch") sessions: no case directory, no
 # directive, no file watching. Real case ids are `YYYY-MM-DD__hex`, so this never

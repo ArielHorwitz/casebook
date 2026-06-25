@@ -114,6 +114,7 @@ class CaseCoordinator:
                 "always_allow": bool(meta.get("always_allow", False)),
                 "state": "stored",
                 "live": False,
+                "last_active": meta.get("last_active") or meta.get("created"),
             }
             self._acp_ids[agent_id] = meta.get("acp_session_id")
             self._created[agent_id] = meta.get("created")
@@ -143,6 +144,7 @@ class CaseCoordinator:
                 if key not in ("type", "agent_id", "case_id") and value is not None:
                     merged[key] = value
         if agent_id in self._agents and event_type in _REPLAYABLE:
+            self._agents[agent_id]["last_active"] = _now_iso()
             self._transcripts.setdefault(agent_id, []).append(event)
             # Only commit to disk once the session is non-trivial; the first real
             # content writes the metadata so meta.toml and the transcript stay paired.
@@ -193,7 +195,7 @@ class CaseCoordinator:
                 "named": not self._auto_named.get(agent_id, True),
                 "acp_session_id": self._acp_ids.get(agent_id),
                 "created": self._created.get(agent_id),
-                "last_active": _now_iso(),
+                "last_active": agent.get("last_active") or _now_iso(),
             }
         )
 
@@ -284,7 +286,8 @@ class CaseCoordinator:
             request_permission=self._request_permission,
         )
         self.sessions.add(session)
-        self._created[agent_id] = _now_iso()
+        now = _now_iso()
+        self._created[agent_id] = now
         self._acp_ids[agent_id] = None
         self._auto_named[agent_id] = True
         self._agents[agent_id] = {
@@ -296,6 +299,7 @@ class CaseCoordinator:
             "always_allow": False,
             "state": "starting",
             "live": True,
+            "last_active": now,
         }
         if case is not None:
             self._watch_case(case)
@@ -485,6 +489,7 @@ class CaseCoordinator:
             "always_allow": source.get("always_allow", False),
             "state": "stored",
             "live": False,
+            "last_active": now,
         }
         self._transcripts[new_agent_id] = transcript
         self._acp_ids[new_agent_id] = None  # fresh session on resume

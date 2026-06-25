@@ -244,6 +244,13 @@ function applyToTranscript(event) {
   } else {
     return;
   }
+  if (event.type === "message") {
+    const agent = state.agents.get(agentId);
+    if (agent) {
+      agent.last_active = new Date().toISOString();
+      renderSessionList();
+    }
+  }
   renderTranscript(agentId);
 }
 
@@ -524,7 +531,11 @@ function renderItem(agentId, item) {
 }
 
 function sessionIds() {
-  return [...state.agents.keys()];
+  return [...state.agents.keys()].sort((a, b) => {
+    const ta = state.agents.get(a).last_active || "";
+    const tb = state.agents.get(b).last_active || "";
+    return tb < ta ? -1 : tb > ta ? 1 : 0;
+  });
 }
 
 function renderSessionList() {

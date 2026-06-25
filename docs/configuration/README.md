@@ -53,7 +53,7 @@ env = { GEMINI_API_KEY = "..." }
 
 [hotkeys]
 new_session = "n"
-focus_next = ["]", "ArrowRight", "ArrowDown"]
+focus_next = ["ArrowRight", "ArrowDown"]
 ```
 
 ## UI sizing

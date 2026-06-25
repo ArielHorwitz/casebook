@@ -7,7 +7,7 @@ the **active** bindings live — press `?` or click the ⌨ button.
 ```toml
 [hotkeys]
 new_session = "n"
-focus_next = ["]", "ArrowRight", "ArrowDown"]
+focus_next = ["ArrowRight", "ArrowDown"]
 delete_session = "D"   # require shift, to make deletes deliberate
 ```
 
@@ -24,8 +24,8 @@ page (sessions).
 | `home` | `h` | anywhere | Go to the cases home page. |
 | `scratch` | `s` | anywhere | Go to the scratch page (caseless one-off sessions). |
 | `cycle_width` | `w` | case page | Step the session-column width through the configured list (see [ui sizing](README.md#ui-sizing)). |
-| `focus_next` | `]` `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
-| `focus_prev` | `[` `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |
+| `focus_next` | `ArrowRight` `ArrowDown` | home / case | Focus the next case (home) or session (case page). |
+| `focus_prev` | `ArrowLeft` `ArrowUp` | home / case | Focus the previous case / session. |
 | `open_focused` | `Enter` | home / case | Home: open the focused case. Case page: focus the open session's input box, or open (resume) the focused session if it's closed. |
 | `rename_session` | `r` | case page | Rename the focused session (prompt). |
 | `name_session` | `g` | case page | Ask the model to name the focused session. |
@@ -47,7 +47,7 @@ page (sessions).
 Keys are matched against the browser's [`KeyboardEvent.key`](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values)
 value:
 
-- **Printable keys** are the literal character: `"c"`, `"/"`, `"]"`, `" "` (space).
+- **Printable keys** are the literal character: `"c"`, `"/"`, `" "` (space).
   They are **case-sensitive**, and the shifted form is the shifted character — so
   `"?"` is Shift+/ and `"X"` is Shift+x. Use that to make destructive actions
   deliberate (e.g. bind `delete_session` to `"D"`).

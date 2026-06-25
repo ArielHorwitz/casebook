@@ -54,7 +54,6 @@ DEFAULT_NAMING_PROMPT = (
 # the browser's KeyboardEvent `key` value, so e.g. "?" is shift+/, "]" is the
 # literal bracket, and arrow keys are "ArrowDown"/"ArrowRight"/etc.
 DEFAULT_HOTKEYS = {
-    "new_case": "c",
     "new_session": "n",
     "home": "h",
     "scratch": "s",
@@ -203,3 +202,9 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
         ui={**DEFAULT_UI, **data.get("ui", {})},
     )
+
+def global_hotkeys() -> dict:
+    """Hotkeys from global config only (no project overrides)."""
+    data = _read_toml(global_config_path())
+    return {**DEFAULT_HOTKEYS, **data.get('hotkeys', {})}
+

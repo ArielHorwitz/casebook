@@ -21,7 +21,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .. import cases, projects
+from .. import cases, config, projects
 from ..coordinator import CaseCoordinator
 
 STATIC_DIR = Path(__file__).parent.joinpath("static")
@@ -118,6 +118,9 @@ def create_app() -> Starlette:
             return JSONResponse({"error": str(error)}, status_code=404)
         return JSONResponse(coordinator.list_backends())
 
+    async def global_hotkeys(_request: Request) -> JSONResponse:
+        return JSONResponse(config.global_hotkeys())
+
     async def hotkeys(request: Request) -> JSONResponse:
         pid = request.path_params["project_id"]
         try:
@@ -174,6 +177,7 @@ def create_app() -> Starlette:
         routes=[
             # Project browser
             Route("/api/projects", projects_endpoint, methods=["GET", "POST"]),
+            Route("/api/hotkeys", global_hotkeys),
             # Project-scoped API
             Route("/api/projects/{project_id}/cases", cases_endpoint,
                   methods=["GET", "POST"]),

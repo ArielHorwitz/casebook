@@ -877,11 +877,14 @@ function runAction(action) {
   const agentId = activeAgentId();
   const agent = agentId && state.agents.get(agentId);
   switch (action) {
-    case "new_case": return newCase();
-    case "new_session": return isSessionPage() ? newSession() : newCase();
+    case "new_session":
+      if (isSessionPage()) return newSession();
+      if (route.mode === "home") return newCase();
+      return;
     case "delete_session": if (route.mode === "home") return deleteFocusedCase(); break;
     case "home":
-      if (route.projectId) return location.href = projectUrl(route.projectId);
+      if (isSessionPage()) return location.href = projectUrl(route.projectId);
+      if (route.mode === "home") return location.href = "/";
       return;
     case "scratch":
       if (route.projectId && route.mode !== "scratch") return location.href = scratchUrl();
@@ -938,8 +941,8 @@ function onKeydown(event) {
 }
 
 async function loadHotkeys() {
-  if (!route.projectId) return; // no hotkeys on project browser
-  const map = await fetch(`${apiBase()}/hotkeys`).then((response) => response.json());
+  const url = route.projectId ? `${apiBase()}/hotkeys` : "/api/hotkeys";
+  const map = await fetch(url).then((response) => response.json());
   state.hotkeyByKey = new Map();
   for (const [action, keys] of Object.entries(map)) {
     for (const key of Array.isArray(keys) ? keys : [keys]) state.hotkeyByKey.set(key, action);
@@ -1226,6 +1229,7 @@ document.addEventListener("keydown", onKeydown);
 
 applyRoute();
 if (route.mode === "projects") {
+  loadHotkeys();
   loadProjects();
 } else if (route.mode === "home") {
   loadHotkeys();

@@ -237,7 +237,10 @@ function applyToTranscript(event) {
     items.push({ kind: "permission", request_id: event.request_id, tool_call: event.tool_call, options: event.options, resolved: false });
   } else if (event.type === "permission_resolved") {
     const perm = items.find((item) => item.kind === "permission" && item.request_id === event.request_id);
-    if (perm) perm.resolved = true;
+    if (perm) {
+      perm.resolved = true;
+      perm.chosen_option_id = event.option_id ?? null;
+    }
   } else {
     return;
   }
@@ -495,11 +498,13 @@ function renderItem(agentId, item) {
     for (const option of item.options) {
       const btn = document.createElement("button");
       btn.textContent = option.name;
+      if (item.resolved && item.chosen_option_id === option.option_id) btn.classList.add("chosen");
       btn.onclick = () => send({ action: "permission", request_id: item.request_id, option_id: option.option_id });
       opts.appendChild(btn);
     }
     const deny = document.createElement("button");
     deny.textContent = "Cancel";
+    if (item.resolved && item.chosen_option_id === null) deny.classList.add("chosen");
     deny.onclick = () => send({ action: "permission", request_id: item.request_id, option_id: null });
     opts.appendChild(deny);
     node.appendChild(opts);

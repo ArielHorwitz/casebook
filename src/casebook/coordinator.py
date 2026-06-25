@@ -708,7 +708,7 @@ class CaseCoordinator:
         else:
             agent_id = None
         self._emit({"type": "permission_resolved", "request_id": request_id,
-                     "agent_id": agent_id})
+                     "agent_id": agent_id, "option_id": option_id})
 
     # --- filesystem watching --------------------------------------------
     def _watch_case(self, case: cases.Case) -> None:

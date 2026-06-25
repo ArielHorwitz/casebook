@@ -431,6 +431,7 @@ body {
   cursor: pointer;
 }
 .permission button:hover { border-color: var(--accent); }
+.permission button.chosen { border-color: var(--accent); background: var(--accent); color: var(--bg); opacity: 1; }
 .permission.resolved { opacity: 0.5; pointer-events: none; }
 
 .composer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); }

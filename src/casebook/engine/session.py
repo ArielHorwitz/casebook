@@ -210,7 +210,7 @@ class AgentSession:
             )
             self._report_usage(getattr(response, "usage", None))
         except Exception as error:  # surface, don't crash the engine
-            self._notify(f"agent error: {error}")
+            self._notify(f"agent error: {error}", level="error")
         finally:
             self._busy = False
             self._set_state("idle")
@@ -243,10 +243,10 @@ class AgentSession:
              "type": "agent_state", "state": state}
         )
 
-    def _notify(self, message: str) -> None:
+    def _notify(self, message: str, level: str = "info") -> None:
         self.emit(
             {"agent_id": self.agent_id, "case_id": self.case_id,
-             "type": "notice", "message": message}
+             "type": "notice", "level": level, "message": message}
         )
 
 

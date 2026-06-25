@@ -237,7 +237,7 @@ function applyToTranscript(event) {
     }
     state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "notice") {
-    items.push({ kind: "notice", message: event.message });
+    items.push({ kind: "notice", message: event.message, level: event.level || "info" });
     state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "permission_request") {
     items.push({ kind: "permission", request_id: event.request_id, tool_call: event.tool_call, options: event.options, resolved: false });
@@ -280,7 +280,7 @@ function applyRawEventToItems(items, event, eventIndex) {
   } else if (event.type === "tool_call") {
     items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
   } else if (event.type === "notice") {
-    items.push({ kind: "notice", message: event.message });
+    items.push({ kind: "notice", message: event.message, level: event.level || "info" });
   }
 }
 
@@ -499,7 +499,7 @@ function renderItem(agentId, item) {
   }
   if (item.kind === "tool") {
     const node = document.createElement("div");
-    node.className = "tool";
+    node.className = "tool" + (item.status === "failed" ? " failed" : "");
     node.innerHTML = `<span class="status ${item.status || ""}">${item.status || ""}</span>` +
       `<span class="tk">${item.tool_kind || "tool"}</span> ` +
       `<span class="title"></span>`;
@@ -508,7 +508,7 @@ function renderItem(agentId, item) {
   }
   if (item.kind === "notice") {
     const node = document.createElement("div");
-    node.className = "notice";
+    node.className = "notice" + (item.level === "error" ? " error" : "");
     node.textContent = item.message;
     return node;
   }

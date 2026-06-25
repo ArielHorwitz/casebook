@@ -317,7 +317,7 @@ class CaseCoordinator:
             self.store.delete(cid, agent_id)
             self._emit({"type": "agent_removed", "agent_id": agent_id, "case_id": cid})
             self._emit({"type": "notice", "agent_id": agent_id, "case_id": cid,
-                        "message": f"failed to start agent: {error}"})
+                        "level": "error", "message": f"failed to start agent: {error}"})
             raise
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
@@ -342,7 +342,7 @@ class CaseCoordinator:
         except KeyError as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": f"cannot resume session: {error}"})
+                        "level": "error", "message": f"cannot resume session: {error}"})
             raise
         session = AgentSession(
             agent_id=agent_id,
@@ -368,7 +368,7 @@ class CaseCoordinator:
             self._emit({"type": "agent_updated", **agent})
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": f"failed to resume session: {error}"})
+                        "level": "error", "message": f"failed to resume session: {error}"})
             raise
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
@@ -525,7 +525,7 @@ class CaseCoordinator:
             except Exception as error:
                 self._emit({"type": "notice", "agent_id": agent_id,
                             "case_id": self._agents[agent_id]["case_id"],
-                            "message": f"could not select default model: {error}"})
+                            "level": "error", "message": f"could not select default model: {error}"})
         self._models[agent_id] = session.available_models
         self._agents[agent_id]["model"] = session.current_model
         self._emit({"type": "models", "agent_id": agent_id,
@@ -543,7 +543,7 @@ class CaseCoordinator:
         except Exception as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": f"could not set model: {error}"})
+                        "level": "error", "message": f"could not set model: {error}"})
             return
         agent["model"] = model_id
         self._persist_meta(agent_id)
@@ -572,7 +572,7 @@ class CaseCoordinator:
         if not transcript_text.strip():
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": "nothing to name yet — the session has no messages"})
+                        "level": "error", "message": "nothing to name yet — the session has no messages"})
             return
         # Echo has no language model, so it is never used to name a session. The
         # naming backend defaults to the session's own backend when that isn't echo.
@@ -580,7 +580,7 @@ class CaseCoordinator:
         if not naming_backend or naming_backend == config.ECHO_BACKEND_NAME:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": "session naming needs a non-echo backend — set "
+                        "level": "error", "message": "session naming needs a non-echo backend — set "
                                    "naming_backend in config.toml"})
             return
         try:
@@ -588,7 +588,7 @@ class CaseCoordinator:
         except KeyError as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": f"cannot name session: {error}"})
+                        "level": "error", "message": f"cannot name session: {error}"})
             return
         prompt = f"{self.config.naming_prompt}\n\n--- transcript ---\n{transcript_text}"
         self._emit({"type": "notice", "agent_id": agent_id,
@@ -600,7 +600,7 @@ class CaseCoordinator:
         except Exception as error:
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
-                        "message": f"naming failed: {error}"})
+                        "level": "error", "message": f"naming failed: {error}"})
             return
         name = _clean_name(reply)
         if name:
@@ -732,7 +732,7 @@ class CaseCoordinator:
                             "files": case.files()})
         except Exception as error:
             self._emit({"type": "notice", "case_id": case_id,
-                        "message": f"file watcher stopped: {error}"})
+                        "level": "error", "message": f"file watcher stopped: {error}"})
 
     # --- lifecycle / reconnection ---------------------------------------
     def snapshot(self) -> dict:

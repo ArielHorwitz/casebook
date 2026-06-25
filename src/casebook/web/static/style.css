@@ -10,7 +10,13 @@
   --agent: #2b3140;
   --thought: #2a2a36;
   --tool: #34302a;
+  --tool-accent: #e0a040;
   --warn: #5a4a2a;
+  --error: #3d2232;
+  --error-accent: #f7768e;
+  --info: #2a3040;
+  --info-accent: #7aa2f7;
+  --permission-accent: #bb9af7;
 }
 
 * { box-sizing: border-box; }
@@ -404,22 +410,33 @@ body {
 
 .tool {
   background: var(--tool);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--tool-accent);
   padding: 6px 10px;
   border-radius: 4px;
   font-size: 13px;
 }
+.tool.failed { border-left-color: var(--error-accent); }
 .tool .tk { color: var(--muted); font-size: 11px; }
 .tool .status { float: right; font-size: 11px; }
 .tool .status.completed { color: #9ece6a; }
 .tool .status.failed { color: #f7768e; }
 .tool .status.in_progress, .tool .status.pending { color: var(--accent); }
 
-.notice { background: var(--warn); padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+.notice {
+  background: var(--info);
+  border-left: 3px solid var(--info-accent);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.notice.error {
+  background: var(--error);
+  border-left-color: var(--error-accent);
+}
 
 .permission {
   background: var(--panel-2);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--permission-accent);
   border-radius: 6px;
   padding: 8px 10px;
 }

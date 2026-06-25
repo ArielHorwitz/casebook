@@ -39,7 +39,9 @@ const state = {
   models: new Map(),
   usage: new Map(),
   panes: new Map(),
-  focusedAgent: null,
+  sidebarFocusedAgent: null,
+  paneFocusedAgent: null,
+  focusRegion: "sidebar",  // "sidebar" | "panes"
   focusedCase: null,
   focusedProject: null,
   cases: [],
@@ -158,9 +160,11 @@ function applySnapshot(snapshot) {
     for (const event of events) applyToTranscript(event);
   }
   const ids = sessionIds();
-  if (!ids.includes(state.focusedAgent)) state.focusedAgent = ids[0] || null;
+  if (!ids.includes(state.sidebarFocusedAgent)) state.sidebarFocusedAgent = ids[0] || null;
+  const pids = paneIds();
+  if (!pids.includes(state.paneFocusedAgent)) state.paneFocusedAgent = pids[0] || null;
   renderSessionList();
-  applyPaneVisibility();
+  applyFocusVisibility();
 }
 
 function upsertAgent(agent) {
@@ -173,9 +177,10 @@ function upsertAgent(agent) {
   } else {
     removePaneOnly(agent.agent_id);
   }
-  if (!state.focusedAgent) state.focusedAgent = agent.agent_id;
+  if (!state.sidebarFocusedAgent) state.sidebarFocusedAgent = agent.agent_id;
+  if (!state.paneFocusedAgent && agent.live) state.paneFocusedAgent = agent.agent_id;
   renderSessionList();
-  applyPaneVisibility();
+  applyFocusVisibility();
 }
 
 function removePaneOnly(agentId) {
@@ -191,9 +196,10 @@ function removeAgent(agentId) {
   state.eventCounts.delete(agentId);
   state.models.delete(agentId);
   state.usage.delete(agentId);
-  if (state.focusedAgent === agentId) state.focusedAgent = sessionIds()[0] || null;
+  if (state.sidebarFocusedAgent === agentId) state.sidebarFocusedAgent = sessionIds()[0] || null;
+  if (state.paneFocusedAgent === agentId) state.paneFocusedAgent = paneIds()[0] || null;
   renderSessionList();
-  applyPaneVisibility();
+  applyFocusVisibility();
 }
 
 function applyToTranscript(event) {
@@ -338,7 +344,11 @@ function buildPane(agent) {
   const promoteBtn = root.querySelector(".promote");
   promoteBtn.hidden = route.mode !== "scratch";
   promoteBtn.onclick = () => promoteSession(agent.agent_id);
-  root.addEventListener("mousedown", () => focusSession(agent.agent_id));
+  root.addEventListener("mousedown", () => {
+    state.paneFocusedAgent = agent.agent_id;
+    state.focusRegion = "panes";
+    applyFocusVisibility();
+  });
 
   const pane = {
     root,
@@ -355,7 +365,7 @@ function buildPane(agent) {
     labelEl: root.querySelector(".label"),
   };
   state.panes.set(agent.agent_id, pane);
-  applyPaneVisibility();
+  applyFocusVisibility();
   renderTranscript(agent.agent_id);
   renderModel(agent.agent_id);
   renderUsage(agent.agent_id);
@@ -538,6 +548,14 @@ function sessionIds() {
   });
 }
 
+function paneIds() {
+  return [...state.panes.keys()];
+}
+
+function activeAgentId() {
+  return state.focusRegion === "panes" ? state.paneFocusedAgent : state.sidebarFocusedAgent;
+}
+
 function renderSessionList() {
   const list = el("session-list");
   if (!list) return;
@@ -546,7 +564,7 @@ function renderSessionList() {
     const agent = state.agents.get(agentId);
     const li = document.createElement("li");
     li.dataset.agentId = agentId;
-    li.className = "session-item" + (agentId === state.focusedAgent ? " focused" : "");
+    li.className = "session-item" + (agentId === state.sidebarFocusedAgent ? " focused" : "");
     const dot = `<span class="dot ${agent.state || ""}"></span>`;
     const meta = agent.live ? (agent.state || "live") : "closed";
     li.innerHTML =
@@ -565,46 +583,71 @@ function renderSessionList() {
 function activateSession(agentId) {
   const agent = state.agents.get(agentId);
   if (!agent) return;
-  state.focusedAgent = agentId;
+  state.sidebarFocusedAgent = agentId;
+  state.focusRegion = "sidebar";
   if (agent.live) {
+    state.paneFocusedAgent = agentId;
     const pane = state.panes.get(agentId);
     if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
   } else {
     send({ action: "resume_agent", agent_id: agentId });
   }
-  applyPaneVisibility();
+  applyFocusVisibility();
 }
 
-function applyPaneVisibility() {
+function applyFocusVisibility() {
   for (const [agentId, pane] of state.panes) {
-    pane.root.classList.toggle("focused", agentId === state.focusedAgent);
+    pane.root.classList.toggle("focused", agentId === state.paneFocusedAgent);
   }
   for (const li of document.querySelectorAll("#session-list li")) {
-    li.classList.toggle("focused", li.dataset.agentId === state.focusedAgent);
+    li.classList.toggle("focused", li.dataset.agentId === state.sidebarFocusedAgent);
   }
+  const sidebar = el("sidebar");
+  const panes = el("agent-panes");
+  if (sidebar) sidebar.classList.toggle("active-region", state.focusRegion === "sidebar");
+  if (panes) panes.classList.toggle("active-region", state.focusRegion === "panes");
   const hint = el("no-open-sessions");
   if (hint) hint.hidden = state.panes.size > 0;
 }
 
 // --- keyboard focus + shortcuts -------------------------------------------
-function focusSession(agentId) {
+function focusSidebarSession(agentId) {
   if (!state.agents.has(agentId)) return;
-  state.focusedAgent = agentId;
-  applyPaneVisibility();
-  const pane = state.panes.get(agentId);
-  if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+  state.sidebarFocusedAgent = agentId;
+  applyFocusVisibility();
   const li = document.querySelector(`#session-list li[data-agent-id="${CSS.escape(agentId)}"]`);
   if (li) li.scrollIntoView({ block: "nearest" });
+}
+
+function focusPane(agentId) {
+  if (!state.panes.has(agentId)) return;
+  state.paneFocusedAgent = agentId;
+  applyFocusVisibility();
+  const pane = state.panes.get(agentId);
+  if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+
+function focusSidebarStep(delta) {
+  const ids = sessionIds();
+  if (ids.length === 0) return;
+  const current = ids.indexOf(state.sidebarFocusedAgent);
+  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
+  focusSidebarSession(ids[next]);
+}
+
+function focusPaneStep(delta) {
+  const ids = paneIds();
+  if (ids.length === 0) return;
+  const current = ids.indexOf(state.paneFocusedAgent);
+  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
+  focusPane(ids[next]);
 }
 
 function focusStep(delta) {
   if (route.mode === "home") return focusCaseStep(delta);
   if (route.mode === "projects") return focusProjectStep(delta);
-  const ids = sessionIds();
-  if (ids.length === 0) return;
-  const current = ids.indexOf(state.focusedAgent);
-  const next = current < 0 ? 0 : (current + delta + ids.length) % ids.length;
-  focusSession(ids[next]);
+  if (state.focusRegion === "panes") return focusPaneStep(delta);
+  return focusSidebarStep(delta);
 }
 
 function caseIds() {
@@ -734,18 +777,30 @@ function openFocused() {
     if (state.focusedCase) location.href = caseUrl(state.focusedCase);
     return;
   }
-  const agent = state.focusedAgent && state.agents.get(state.focusedAgent);
+  if (state.focusRegion === "panes") {
+    const pane = state.paneFocusedAgent && state.panes.get(state.paneFocusedAgent);
+    if (pane) pane.input.focus();
+    return;
+  }
+  // Sidebar region: activate the focused sidebar session.
+  const agentId = state.sidebarFocusedAgent;
+  const agent = agentId && state.agents.get(agentId);
   if (!agent) return;
   if (agent.live) {
-    const pane = state.panes.get(state.focusedAgent);
-    if (pane) pane.input.focus();
+    state.paneFocusedAgent = agentId;
+    const pane = state.panes.get(agentId);
+    if (pane) {
+      pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+      pane.input.focus();
+    }
+    applyFocusVisibility();
   } else {
-    activateSession(state.focusedAgent);
+    activateSession(agentId);
   }
 }
 
 function runAction(action) {
-  const agentId = state.focusedAgent;
+  const agentId = activeAgentId();
   const agent = agentId && state.agents.get(agentId);
   switch (action) {
     case "new_case": return newCase();
@@ -775,8 +830,9 @@ function runAction(action) {
 }
 
 function cancelTurn() {
-  if (isSessionPage() && state.focusedAgent) {
-    send({ action: "cancel", agent_id: state.focusedAgent });
+  const agentId = activeAgentId();
+  if (isSessionPage() && agentId) {
+    send({ action: "cancel", agent_id: agentId });
   }
 }
 
@@ -795,6 +851,12 @@ function onKeydown(event) {
     if (isTyping()) return document.activeElement.blur();
   }
   if (isTyping()) return;
+  if (event.key === "Tab" && isSessionPage()) {
+    event.preventDefault();
+    state.focusRegion = state.focusRegion === "sidebar" ? "panes" : "sidebar";
+    applyFocusVisibility();
+    return;
+  }
   const action = state.hotkeyByKey.get(event.key);
   if (!action) return;
   event.preventDefault();

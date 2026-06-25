@@ -263,7 +263,8 @@ body {
 #session-list { list-style: none; margin: 0 0 4px; padding: 0; }
 .session-item { display: flex; align-items: center; border-radius: 6px; }
 .session-item:hover { background: var(--panel-2); }
-.session-item.focused { outline: 1px solid var(--accent); }
+.session-item.focused { outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+#sidebar.active-region .session-item.focused { outline-color: var(--accent); }
 .session-item .open {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
   background: none; border: none; color: inherit; cursor: pointer;
@@ -499,7 +500,8 @@ body {
 #hotkey-hint:hover { color: var(--text); border-color: var(--accent); }
 #connection { margin-left: 0; font-size: 12px; }
 
-.agent-pane.focused { border-color: var(--accent); }
+.agent-pane.focused { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+#agent-panes.active-region .agent-pane.focused { border-color: var(--accent); }
 
 #toasts {
   position: fixed;

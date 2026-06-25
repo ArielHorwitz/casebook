@@ -134,6 +134,8 @@ class Config:
     # no language model); when this resolves to echo, naming is unavailable.
     naming_backend: Optional[str] = None
     naming_model: Optional[str] = None
+    # Whether new sessions start with always-allow enabled.
+    default_always_allow: bool = False
     # Action -> key, or a list of keys (the browser binds each to that action).
     hotkeys: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
     ui: dict = field(default_factory=lambda: dict(DEFAULT_UI))
@@ -197,6 +199,7 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         default_model=data.get("default_model"),
         naming_backend=data.get("naming_backend"),
         naming_model=data.get("naming_model"),
+        default_always_allow=bool(data.get("default_always_allow", False)),
         hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
         ui={**DEFAULT_UI, **data.get("ui", {})},
     )

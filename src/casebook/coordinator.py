@@ -296,7 +296,7 @@ class CaseCoordinator:
             "label": label,
             "backend": backend.name,
             "model": None,
-            "always_allow": False,
+            "always_allow": self.config.default_always_allow,
             "state": "starting",
             "live": True,
             "last_active": now,

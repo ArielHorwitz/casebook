@@ -217,7 +217,7 @@ function applyToTranscript(event) {
     if (streaming && last && last.kind === "message" && last.role === event.role && last.streaming) {
       last.text += event.text;
     } else {
-      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system, eventIndex });
+      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system, eventIndex, ts: event.ts });
     }
     state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "tool_call") {
@@ -263,7 +263,7 @@ function applyTranscriptReset(event) {
 
 function applyRawEventToItems(items, event, eventIndex) {
   if (event.type === "message") {
-    items.push({ kind: "message", role: event.role, text: event.text, streaming: false, system: event.system, eventIndex });
+    items.push({ kind: "message", role: event.role, text: event.text, streaming: false, system: event.system, eventIndex, ts: event.ts });
   } else if (event.type === "tool_call") {
     items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
   } else if (event.type === "notice") {
@@ -430,10 +430,20 @@ function renderItem(agentId, item) {
   if (item.kind === "message") {
     const node = document.createElement("div");
     node.className = `bubble ${item.role}` + (item.system ? " system" : "");
+    const header = document.createElement("div");
+    header.className = "bubble-header";
     const role = document.createElement("span");
     role.className = "role";
     role.textContent = item.system ? "system" : item.role;
-    node.appendChild(role);
+    header.appendChild(role);
+    if (item.ts) {
+      const ts = document.createElement("span");
+      ts.className = "ts";
+      ts.textContent = new Date(item.ts).toLocaleTimeString();
+      ts.title = new Date(item.ts).toLocaleString();
+      header.appendChild(ts);
+    }
+    node.appendChild(header);
     const body = document.createElement("div");
     if (item.role === "user") {
       body.className = "content";

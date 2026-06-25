@@ -132,6 +132,7 @@ class CaseCoordinator:
 
     # --- single emit choke point: record, persist, then publish ----------
     def _emit(self, event: dict) -> None:
+        event.setdefault("ts", _now_iso())
         agent_id = event.get("agent_id")
         event_type = event.get("type")
         if event_type == "agent_state" and agent_id in self._agents:

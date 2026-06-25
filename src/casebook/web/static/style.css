@@ -356,7 +356,9 @@ body {
 .bubble.agent { background: var(--agent); }
 .bubble.thought { background: var(--thought); color: var(--muted); font-style: italic; font-size: 13px; }
 .bubble.system { opacity: 0.6; font-size: 12px; }
-.bubble .role { font-size: 10px; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 2px; }
+.bubble-header { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.bubble .role { font-size: 10px; text-transform: uppercase; color: var(--muted); }
+.bubble .ts { font-size: 10px; color: var(--muted); opacity: 0.7; }
 
 /* Rendered markdown — shared by agent bubbles and the file preview. */
 .markdown > :first-child { margin-top: 0; }

@@ -296,7 +296,7 @@ function applyToTranscript(event) {
   if (event.type === "message") {
     const agent = state.agents.get(agentId);
     if (agent) {
-      agent.last_active = new Date().toISOString();
+      agent.last_active = event.ts || agent.last_active;
       renderSessionList();
     }
   }

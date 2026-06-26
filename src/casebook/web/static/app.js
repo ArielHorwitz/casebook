@@ -1050,6 +1050,11 @@ async function initProjectPath(path) {
 // --- cases (project home page) --------------------------------------------
 async function loadCases() {
   state.cases = await fetch(`${apiBase()}/cases`).then((response) => response.json());
+  state.cases.sort((a, b) => {
+    const ta = a.last_active || a.created || "";
+    const tb = b.last_active || b.created || "";
+    return tb < ta ? -1 : tb > ta ? 1 : 0;
+  });
   const list = el("case-list");
   list.replaceChildren();
   for (const caseEntry of state.cases) {

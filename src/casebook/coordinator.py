@@ -251,14 +251,19 @@ class CaseCoordinator:
         return target.read_text()
 
     def _case_summary(self, case: cases.Case) -> dict:
-        sessions = sum(1 for a in self._agents.values() if a["case_id"] == case.case_id)
+        case_agents = [a for a in self._agents.values() if a["case_id"] == case.case_id]
+        last_active = max(
+            (a.get("last_active") or "" for a in case_agents),
+            default=case.metadata.get("created") or "",
+        ) or case.metadata.get("created")
         return {
             "case_id": case.case_id,
             "title": case.title,
             "status": case.status,
             "keywords": case.keywords,
             "created": case.metadata.get("created"),
-            "sessions": sessions,
+            "last_active": last_active,
+            "sessions": len(case_agents),
             "hidden": case.hidden,
         }
 

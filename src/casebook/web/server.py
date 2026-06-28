@@ -27,14 +27,33 @@ from ..coordinator import CaseCoordinator
 STATIC_DIR = Path(__file__).parent.joinpath("static")
 
 
-def create_app() -> Starlette:
+def create_app(
+    *,
+    write_info: bool = False,
+    open_browser: bool = False,
+    bound_port: int = 0,
+    project_path: str | None = None,
+) -> Starlette:
     coordinators: dict[str, CaseCoordinator] = {}
 
     @asynccontextmanager
     async def lifespan(_app: Starlette):
+        if write_info:
+            from .. import state
+            state.write_server_info(bound_port)
+        if open_browser:
+            import webbrowser
+            url = f"http://127.0.0.1:{bound_port}"
+            if project_path is not None:
+                entry = projects.open_project(Path(project_path))
+                url = f"{url}/project/{entry['id']}/"
+            webbrowser.open(url)
         try:
             yield
         finally:
+            if write_info:
+                from .. import state
+                state.remove_server_info()
             for coordinator in coordinators.values():
                 await coordinator.shutdown()
 
@@ -264,6 +283,18 @@ async def _guard(coro) -> None:
         pass
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 9721,
+    write_info: bool = False,
+    open_browser: bool = False,
+    project_path: str | None = None,
+) -> None:
     print(f"casebook serving on http://{host}:{port}")
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    app = create_app(
+        write_info=write_info,
+        open_browser=open_browser,
+        bound_port=port,
+        project_path=project_path,
+    )
+    uvicorn.run(app, host=host, port=port, log_level="warning")

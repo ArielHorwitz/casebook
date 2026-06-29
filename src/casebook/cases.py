@@ -103,6 +103,8 @@ def load_case(case_path: Path) -> Case:
 
 
 def iter_case_dirs(casebook_path: Path):
+    if not casebook_path.is_dir():
+        return []
     return sorted(
         entry
         for entry in casebook_path.iterdir()

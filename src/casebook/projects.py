@@ -2,7 +2,7 @@
 
 Casebook tracks which project directories the user has opened, persisted as a
 lightweight JSON file at ``~/.config/casebook/projects.json``. Entries are
-pruned automatically when their path no longer contains a casebook directory.
+pruned automatically when their path no longer exists.
 
 A project id is a deterministic short hex hash of the resolved absolute path,
 used in URLs (``/project/{id}/``) so paths never appear in the address bar.
@@ -48,15 +48,9 @@ def _write_cache(entries: list[dict]) -> None:
     cache_file.write_text(json.dumps(entries, indent=2) + "\n")
 
 
-def _is_valid_project(path_str: str) -> bool:
-    """True if the path exists and contains a casebook directory."""
-    path = Path(path_str)
-    return path.is_dir() and path.joinpath(cases.CASEBOOK_DIR).is_dir()
-
-
 def _prune(entries: list[dict]) -> list[dict]:
-    """Drop entries whose path no longer contains a valid casebook."""
-    return [entry for entry in entries if _is_valid_project(entry["path"])]
+    """Drop entries whose path no longer exists."""
+    return [entry for entry in entries if Path(entry["path"]).is_dir()]
 
 
 def list_projects() -> list[dict]:
@@ -73,10 +67,8 @@ def list_projects() -> list[dict]:
 def open_project(path: Path) -> dict:
     """Validate and upsert a project path into the cache. Returns the entry."""
     resolved = path.resolve()
-    if not resolved.joinpath(cases.CASEBOOK_DIR).is_dir():
-        raise cases.CasebookError(
-            f"no casebook found at {resolved} (looking for {cases.CASEBOOK_DIR}/)"
-        )
+    if not resolved.is_dir():
+        raise cases.CasebookError(f"directory does not exist: {resolved}")
     pid = project_id(resolved)
     now = datetime.now().isoformat()
     entries = _read_cache()
@@ -96,25 +88,15 @@ def open_project(path: Path) -> dict:
     return entry
 
 
-def init_project(path: Path) -> dict:
-    """Create ``docs/casebook/`` and ``.casebook/`` in the given directory, then cache it."""
-    resolved = path.resolve()
-    if not resolved.is_dir():
-        raise cases.CasebookError(f"directory does not exist: {resolved}")
-    resolved.joinpath(cases.CASEBOOK_DIR).mkdir(parents=True, exist_ok=True)
-    resolved.joinpath(".casebook").mkdir(parents=True, exist_ok=True)
-    return open_project(resolved)
-
-
 def resolve_project(pid: str) -> Path:
     """Look up a project id in the cache and return its path."""
     entries = _read_cache()
     for entry in entries:
         if entry["id"] == pid:
             path = Path(entry["path"])
-            if not _is_valid_project(entry["path"]):
+            if not path.is_dir():
                 raise cases.CasebookError(
-                    f"project at {entry['path']} no longer has a valid casebook"
+                    f"project directory no longer exists: {entry['path']}"
                 )
             return path
     raise cases.CasebookError(f"unknown project: {pid}")

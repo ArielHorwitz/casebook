@@ -22,11 +22,11 @@ from . import state
 
 def _open_browser(port: int, project_path: str | None = None) -> None:
     """Open the browser to the casebook UI, optionally at a project page."""
+    from urllib.parse import quote
     base_url = f"http://127.0.0.1:{port}"
     if project_path is not None:
-        from . import projects
-        entry = projects.open_project(Path(project_path))
-        url = f"{base_url}/project/{entry['id']}/"
+        resolved = str(Path(project_path).resolve())
+        url = f"{base_url}/?path={quote(resolved, safe='/')}"
     else:
         url = base_url
     webbrowser.open(url)

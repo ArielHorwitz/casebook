@@ -41,7 +41,16 @@ class SessionStore:
     def _session_dir(self, case_id: str, agent_id: str) -> Path:
         return self.root.joinpath(case_id, agent_id)
 
+    def _ensure_dotdir(self) -> None:
+        """Create ``.casebook/`` with a ``.gitignore`` if it doesn't exist."""
+        dotdir = self.root.parent  # .casebook/
+        gitignore = dotdir.joinpath(".gitignore")
+        if not gitignore.exists():
+            dotdir.mkdir(parents=True, exist_ok=True)
+            gitignore.write_text("*\n")
+
     def write_meta(self, meta: dict) -> None:
+        self._ensure_dotdir()
         session_dir = self._session_dir(meta["case_id"], meta["agent_id"])
         session_dir.mkdir(parents=True, exist_ok=True)
         session_dir.joinpath(META_FILENAME).write_text(_to_toml(meta))

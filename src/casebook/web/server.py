@@ -43,10 +43,11 @@ def create_app(
             state.write_server_info(bound_port)
         if open_browser:
             import webbrowser
+            from urllib.parse import quote
             url = f"http://127.0.0.1:{bound_port}"
             if project_path is not None:
-                entry = projects.open_project(Path(project_path))
-                url = f"{url}/project/{entry['id']}/"
+                resolved = str(Path(project_path).resolve())
+                url = f"{url}/?path={quote(resolved, safe='/')}"
             webbrowser.open(url)
         try:
             yield
@@ -78,13 +79,9 @@ def create_app(
     async def projects_endpoint(request: Request) -> JSONResponse:
         if request.method == "POST":
             body = await request.json()
-            action = body.get("action", "open")
             path = Path(body.get("path", ""))
             try:
-                if action == "init":
-                    entry = projects.init_project(path)
-                else:
-                    entry = projects.open_project(path)
+                entry = projects.open_project(path)
                 # Eagerly create the coordinator so case counts are available.
                 coordinator = get_coordinator(entry["id"])
                 entry["cases"] = len(coordinator.list_cases())

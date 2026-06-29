@@ -785,7 +785,6 @@ function renderProjectDetail(projectId) {
     return;
   }
   el("project-placeholder").hidden = true;
-  el("init-prompt").hidden = true;
   el("project-detail").hidden = false;
   el("pd-name").textContent = project.name;
   el("pd-path").textContent = project.path;
@@ -1016,34 +1015,13 @@ async function openProjectPath(path) {
   const response = await fetch("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: path.trim(), action: "open" }),
+    body: JSON.stringify({ path: path.trim() }),
   });
   const data = await response.json();
   if (response.ok) {
     location.href = projectUrl(data.id);
-  } else if (data.error && data.error.includes("no casebook found")) {
-    // Show init prompt
-    el("project-detail").hidden = true;
-    el("project-placeholder").hidden = true;
-    el("init-prompt").hidden = false;
-    el("init-prompt-path").textContent = path.trim();
-    el("init-project").onclick = () => initProjectPath(path.trim());
   } else {
     toast(data.error || "Failed to open project", "error");
-  }
-}
-
-async function initProjectPath(path) {
-  const response = await fetch("/api/projects", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, action: "init" }),
-  });
-  const data = await response.json();
-  if (response.ok) {
-    location.href = projectUrl(data.id);
-  } else {
-    toast(data.error || "Failed to initialize project", "error");
   }
 }
 
@@ -1191,7 +1169,6 @@ function applyRoute() {
   // Main sections
   el("project-detail").hidden = true;
   el("project-placeholder").hidden = !isProjects;
-  el("init-prompt").hidden = true;
   el("agents").hidden = !(isCase || isScratch);
   el("case-detail").hidden = true;
   el("placeholder").hidden = !isHome;
@@ -1236,6 +1213,8 @@ applyRoute();
 if (route.mode === "projects") {
   loadHotkeys();
   loadProjects();
+  const pathParam = new URLSearchParams(location.search).get("path");
+  if (pathParam) openProjectPath(pathParam);
 } else if (route.mode === "home") {
   loadHotkeys();
   loadUi();

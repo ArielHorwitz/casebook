@@ -170,20 +170,6 @@ body {
 #pd-path { font-size: 13px; margin-bottom: 4px; }
 #pd-meta { font-size: 13px; }
 
-/* Init prompt (shown when a directory has no casebook). */
-#init-prompt { flex: 1; overflow: auto; padding: 24px 28px; }
-#init-prompt h2 { margin: 0 0 8px; }
-#init-project {
-  background: var(--accent);
-  color: #11131a;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 14px;
-  margin-top: 8px;
-}
 
 #case-list { list-style: none; margin: 0; padding: 0; }
 .case-item { border-radius: 6px; }

@@ -79,6 +79,13 @@ DEFAULT_UI = {
     "session_max_width": "none",
     # Widths the resize hotkey cycles through (any CSS lengths).
     "session_widths": ["20%", "33%", "50%", "66%", "75%", "100%"],
+    # Status -> CSS color for case titles in the sidebar. Any status not listed
+    # here inherits the default text color.  Override or extend under
+    # [ui.case_colors] in config.toml.
+    "case_colors": {
+        "open": "#9ece6a",
+        "closed": "#9a9db0",
+    },
 }
 
 
@@ -164,6 +171,15 @@ def _parse_backends(raw: dict) -> dict[str, Backend]:
     }
 
 
+def _merge_ui(overrides: dict) -> dict:
+    """Merge user UI overrides into DEFAULT_UI, deep-merging dict-valued keys."""
+    merged = {**DEFAULT_UI, **overrides}
+    for key, default_value in DEFAULT_UI.items():
+        if isinstance(default_value, dict) and key in overrides:
+            merged[key] = {**default_value, **overrides[key]}
+    return merged
+
+
 def load_config(project_root: Optional[Path] = None) -> Config:
     """Built-in backends overlaid with global config, then project-local config.
 
@@ -200,7 +216,7 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         naming_model=data.get("naming_model"),
         default_always_allow=bool(data.get("default_always_allow", False)),
         hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
-        ui={**DEFAULT_UI, **data.get("ui", {})},
+        ui=_merge_ui(data.get("ui", {})),
     )
 
 def global_hotkeys() -> dict:

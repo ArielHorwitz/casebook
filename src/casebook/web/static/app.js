@@ -50,6 +50,7 @@ const state = {
   hotkeyByKey: new Map(),
   widths: [],
   widthIndex: -1,
+  caseColors: {},
   prevUsage: new Map(),  // agent_id → {input_tokens, output_tokens, total_tokens} for computing deltas
 };
 
@@ -966,6 +967,7 @@ async function loadUi() {
   if (ui.session_min_width) style.setProperty("--session-min-width", ui.session_min_width);
   if (ui.session_max_width) style.setProperty("--session-max-width", ui.session_max_width);
   state.widths = Array.isArray(ui.session_widths) ? ui.session_widths : [];
+  state.caseColors = ui.case_colors || {};
   const saved = localStorage.getItem("casebook.sessionWidth");
   const width = saved || ui.session_width;
   if (width) style.setProperty("--session-width", width);
@@ -1044,6 +1046,8 @@ async function loadCases() {
     link.href = caseUrl(caseEntry.case_id);
     link.title = caseEntry.title;
     link.textContent = caseEntry.title;
+    const statusColor = (state.caseColors || {})[caseEntry.status];
+    if (statusColor) link.style.color = statusColor;
     link.onclick = (event) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey) return;
       event.preventDefault();

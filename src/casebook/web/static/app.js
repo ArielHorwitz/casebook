@@ -151,7 +151,9 @@ function applySnapshot(snapshot) {
   state.prevUsage.clear();
   for (const [agentId, pane] of state.panes) pane.root.remove();
   state.panes.clear();
+  state._snapshotLoading = true;
   for (const agent of snapshot.agents) upsertAgent(agent);
+  state._snapshotLoading = false;
   for (const [agentId, models] of Object.entries(snapshot.models || {})) {
     state.models.set(agentId, { available: models, current: (state.agents.get(agentId) || {}).model });
     renderModel(agentId);
@@ -164,15 +166,17 @@ function applySnapshot(snapshot) {
     for (const event of events) applyToTranscript(event);
   }
   const ids = sessionIds();
-  if (!ids.includes(state.sidebarFocusedAgent)) state.sidebarFocusedAgent = ids[0] || null;
+  state.sidebarFocusedAgent = ids[0] || null;
   const pids = paneIds();
-  if (!pids.includes(state.paneFocusedAgent)) state.paneFocusedAgent = pids[0] || null;
+  state.paneFocusedAgent = pids[0] || null;
   renderSessionList();
   applyFocusVisibility();
+  scrollSidebarToFocused();
 }
 
 function upsertAgent(agent) {
   if (!isSessionPage() || agent.case_id !== route.caseId) return;
+  const isNew = !state.agents.has(agent.agent_id) && !state._snapshotLoading;
   state.agents.set(agent.agent_id, agent);
   if (!state.transcripts.has(agent.agent_id)) state.transcripts.set(agent.agent_id, []);
   if (agent.live) {
@@ -181,10 +185,23 @@ function upsertAgent(agent) {
   } else {
     removePaneOnly(agent.agent_id);
   }
-  if (!state.sidebarFocusedAgent) state.sidebarFocusedAgent = agent.agent_id;
-  if (!state.paneFocusedAgent && agent.live) state.paneFocusedAgent = agent.agent_id;
+  if (isNew) {
+    state.sidebarFocusedAgent = agent.agent_id;
+    if (agent.live) state.paneFocusedAgent = agent.agent_id;
+  } else {
+    if (!state.sidebarFocusedAgent) state.sidebarFocusedAgent = agent.agent_id;
+    if (!state.paneFocusedAgent && agent.live) state.paneFocusedAgent = agent.agent_id;
+  }
   renderSessionList();
   applyFocusVisibility();
+  if (isNew && agent.live) {
+    scrollSidebarToFocused();
+    const pane = state.panes.get(agent.agent_id);
+    if (pane) {
+      pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+      pane.input.focus();
+    }
+  }
 }
 
 function removePaneOnly(agentId) {
@@ -683,6 +700,12 @@ function applyFocusVisibility() {
   if (panes) panes.classList.toggle("active-region", state.focusRegion === "panes");
   const hint = el("no-open-sessions");
   if (hint) hint.hidden = state.panes.size > 0;
+}
+
+function scrollSidebarToFocused() {
+  if (!state.sidebarFocusedAgent) return;
+  const li = document.querySelector(`#session-list li[data-agent-id="${CSS.escape(state.sidebarFocusedAgent)}"]`);
+  if (li) li.scrollIntoView({ block: "nearest" });
 }
 
 // --- keyboard focus + shortcuts -------------------------------------------

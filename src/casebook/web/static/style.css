@@ -273,6 +273,7 @@ body {
 .session-item .rename:hover, .session-item .trash:hover { color: var(--text); }
 
 .agent-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
@@ -344,6 +345,26 @@ body {
 .agent-head .delete:hover { color: var(--text); }
 
 .transcript { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.scroll-bottom {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  z-index: 10;
+}
+.scroll-bottom:hover { background: var(--agent); }
 .bubble { padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
 .bubble.user { background: var(--user); align-self: flex-end; max-width: 90%; }
 .bubble.agent { background: var(--agent); }

@@ -377,6 +377,7 @@ function buildPane(agent) {
       <div class="agent-usage"></div>
     </div>
     <div class="transcript"></div>
+    <button class="scroll-bottom" hidden title="Jump to bottom">&#x2193;</button>
     <div class="composer">
       <textarea rows="1" placeholder="Message this session…"></textarea>
       <button class="send">Send</button>
@@ -424,6 +425,7 @@ function buildPane(agent) {
   const pane = {
     root,
     transcript: root.querySelector(".transcript"),
+    scrollBottomBtn: root.querySelector(".scroll-bottom"),
     input,
     sendBtn,
     cancelBtn,
@@ -435,6 +437,13 @@ function buildPane(agent) {
     stateEl: root.querySelector(".state"),
     labelEl: root.querySelector(".label"),
   };
+  pane.scrollBottomBtn.onclick = () => {
+    pane.transcript.scrollTop = pane.transcript.scrollHeight;
+  };
+  pane.transcript.addEventListener("scroll", () => {
+    const nearBottom = pane.transcript.scrollHeight - pane.transcript.scrollTop - pane.transcript.clientHeight < 80;
+    pane.scrollBottomBtn.hidden = nearBottom;
+  });
   state.panes.set(agent.agent_id, pane);
   applyFocusVisibility();
   renderTranscript(agent.agent_id);
@@ -508,9 +517,16 @@ function updateHead(agentId) {
 function renderTranscript(agentId) {
   const pane = state.panes.get(agentId);
   if (!pane) return;
+  const el = pane.transcript;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   const items = state.transcripts.get(agentId) || [];
-  pane.transcript.replaceChildren(...items.map((item) => renderItem(agentId, item)));
-  pane.transcript.scrollTop = pane.transcript.scrollHeight;
+  el.replaceChildren(...items.map((item) => renderItem(agentId, item)));
+  if (nearBottom) {
+    el.scrollTop = el.scrollHeight;
+    pane.scrollBottomBtn.hidden = true;
+  } else {
+    pane.scrollBottomBtn.hidden = false;
+  }
 }
 
 function renderItem(agentId, item) {

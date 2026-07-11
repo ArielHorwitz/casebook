@@ -473,6 +473,8 @@ body {
   padding: 8px;
   font: inherit;
   min-height: 40px;
+  max-height: 20vh;
+  overflow-y: auto;
 }
 .composer textarea:disabled { opacity: 0.5; }
 .composer button {

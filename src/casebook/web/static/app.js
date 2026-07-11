@@ -394,7 +394,13 @@ function buildPane(agent) {
     if (!text) return;
     send({ action: "send", agent_id: agent.agent_id, text });
     input.value = "";
+    input.style.height = "auto";
   };
+  const autoResize = () => {
+    input.style.height = "auto";
+    input.style.height = input.scrollHeight + "px";
+  };
+  input.addEventListener("input", autoResize);
   sendBtn.onclick = doSend;
   input.onkeydown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {

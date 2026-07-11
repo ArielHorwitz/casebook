@@ -388,6 +388,7 @@ function buildPane(agent) {
   const sendBtn = root.querySelector(".send");
   const cancelBtn = root.querySelector(".cancel");
   const doSend = () => {
+    if (sendBtn.disabled) return;
     const text = input.value.trim();
     if (!text) return;
     send({ action: "send", agent_id: agent.agent_id, text });
@@ -500,7 +501,6 @@ function updateHead(agentId) {
   pane.resumeBtn.hidden = live;
   pane.composer.hidden = !live;
   pane.allowInput.checked = !!agent.always_allow;
-  pane.input.disabled = working;
   pane.sendBtn.disabled = working;
   pane.cancelBtn.hidden = agent.state !== "working";
 }

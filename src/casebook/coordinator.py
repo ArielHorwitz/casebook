@@ -418,6 +418,9 @@ class CaseCoordinator:
         session = self.sessions.get(agent_id)
         if session is not None:
             session.retag(new_cid)
+        # Queue the casebook directive so the agent learns about its case on the
+        # next user message (the subprocess was started without one).
+        self._pending_context[agent_id] = templates.system_instructions(new_cid)
         self._watch_case(case)
         self._persist_meta(agent_id)  # rewrite meta.toml under the new case dir
         # Drop the pane from scratch views; refresh the home cases list.

@@ -24,6 +24,27 @@ user confirmation. See `handoff-backend-installation-and-configuration-ux.md`.
 UI preferences. First-time onboarding via contextual banners rather than a
 wizard. See `handoff-settings-page-and-first-time-onboarding.md`.
 
+### 4. Friendly installation
+**Decision:** Use `uv tool install git+https://github.com/<owner>/casebook` as
+the primary install method. The package already has a standard `pyproject.toml`
+with a `[project.scripts]` entrypoint and hatchling build backend, so this works
+out of the box — users get an isolated venv, the `casebook` CLI on PATH, and
+upgrades via `uv tool upgrade casebook`.
+
+**Prerequisites to verify:**
+- The built wheel must include everything needed at runtime (frontend assets,
+  data files like the backends registry). The current
+  `hatch.build.targets.wheel.packages` only lists `src/casebook`; bundled
+  frontend or data files may need explicit inclusion.
+- A build step (e.g. `justfile` target) should produce frontend assets before
+  `uv build` for development/release workflows.
+
+**Future considerations:**
+- PyPI publication (`uv tool install casebook` without git URL) — friendlier but
+  deferred until the project is ready for broader distribution.
+- `pipx install` as an alternative for users without uv — same mechanism, worth
+  mentioning in docs.
+
 ## Deferred
 
 - **Single binary packaging** (PyInstaller, Tauri, Rust rewrite) — deferred as a

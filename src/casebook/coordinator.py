@@ -158,7 +158,7 @@ class CaseCoordinator:
     def _report_activity(self) -> None:
         """Print a console line when the set of busy sessions changes.
 
-        Lets you glance at the terminal running `casebook serve` before Ctrl+C to
+        Lets you glance at the terminal running `casebook --fg` before Ctrl+C to
         see whether any session is still working.
         """
         busy = {

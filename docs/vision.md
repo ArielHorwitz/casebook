@@ -30,7 +30,7 @@ These are load-bearing. The rework must not violate them.
   The power of the system is already latent in its simplicity; the app exposes
   it, it does not add scaffolding.
 - **Filesystem is the source of truth.** Case state lives on disk — the case
-  directory, `case.toml`, `intro.md`, `overview.md`, and whatever else the work
+  directory, `case.toml`, `overview.md`, and whatever else the work
   produces. The app reflects the filesystem; it does not become a competing
   store of state.
 - **Vendor-agnostic.** The user should not be locked into any single agent

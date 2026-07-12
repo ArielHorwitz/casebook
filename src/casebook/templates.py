@@ -1,72 +1,48 @@
 """Static text templates owned by the tool.
 
-Kept apart from logic so the directive wording is easy to find and edit. The
-casebook directive (`AGENTS_MD`) is both written to `docs/casebook/agents.md` for
-humans and inlined into each agent's bootstrap turn as its system instructions —
-see `system_instructions`.
-"""
-
-ROOT_AGENTS_EXCERPT = """\
-
-## Casebook
-
-This project uses a **casebook** at `docs/casebook/` to organize bounded units
-of work — investigations, brainstorms, features, designs, and similar efforts
-that benefit from a dedicated directory of files and documentation.
-
-Historical cases and their context can be found there. See
-`docs/casebook/agents.md` for structure and conventions.
+Kept apart from logic so the directive wording is easy to find and edit.
 """
 
 AGENTS_MD = """\
 # Casebook
 
-This directory is a **casebook** — a collection of cases, each representing a
-bounded unit of work (investigation, brainstorm, feature, design, etc.).
+You have been assigned to a **case** — a bounded unit of work (investigation,
+brainstorm, feature, design, etc.) with its own directory under `docs/casebook/`.
 
-## Structure
+## Your case directory
 
-```
-docs/casebook/
-  agents.md          # this file
-  YYYY-MM-DD__hex/   # case directory
-    case.toml        # case metadata
-    overview.md      # evolving summary of the case (keep updated)
-    ...              # any other files: reports, designs, ADRs, transcripts, etc.
-```
+Each case directory contains:
 
-## Working with cases
+- **`case.toml`** — metadata that casebook uses for listing and discovery.
+  Keep its fields current as the work evolves:
+  - `title`: the primary way cases are discovered. It should capture the full
+    scope — anyone searching for this case should be able to find it by title.
+    New cases default to "Unnamed case"; rename early and refine as scope
+    becomes clearer.
+  - `status`: any value is valid — typically `open` or `closed`, but
+    freeform values like `blocked` or `paused` work too.
+  - `keywords`: keep updated to help future sessions find relevant cases.
+- **`overview.md`** — a living summary of the case. Create it early and keep it
+  current so future sessions can quickly load context.
+- **Other files** — analysis, reports, decisions, designs, etc. Use highly
+  descriptive filenames so that a reader can understand what a file contains
+  from its name alone (e.g. `websocket-reconnection-backoff-strategy.md`, not
+  `notes.md`).
 
-- New cases are created by the user via `casebook new` — agents should
-  work within existing cases rather than creating new ones.
-- `case.toml` is the `casebook` CLI's interface to the case — a fixed schema the
-  tool parses for listing and discovery (`title`, `status`, `keywords`,
-  `created`). It is owned by the tool: keep its fields current as the work
-  evolves, but don't use it to record the case's content.
-- `title` is the primary way cases are discovered, so it should capture the full
-  scope of the case — anyone looking for this case's information should be able
-  to find it by title. New cases default to "Unnamed case"; rename early and
-  refine as the scope becomes clearer.
-- `status` is typically `open` or `closed`, though others such as `blocked` or
-  `paused` are fine too. Keep `keywords` updated to help future sessions find
-  relevant cases.
-- Beyond `case.toml`, list the case directory to see what files are available
-  and read whichever are relevant to your task. These files hold the case's
-  actual content — analysis, reports, decisions, designs, transcripts, etc.
-  Code typically belongs in the source tree, not in the case directory.
-- Use highly descriptive filenames so that an agent can understand what a file
-  contains by reading its name alone. Prefer names like
-  `websocket-reconnection-backoff-strategy.md` or
-  `user-dashboard-layout-accessibility-review.md` over vague names like
-  `report.md` or `notes.md`.
-- A case typically grows an `overview.md` as a living summary. Create and update
-  it as the case evolves to keep it useful for future sessions.
-- Some cases include an `intro.md` with the user's original writeup. When
-  present it is the original context, kept for posterity — do not modify it.
-- The casebook includes past cases that may provide historical context for
-  design decisions, prior investigations, or previously considered approaches.
-  Use `casebook list` to browse cases and `casebook show <id>` for details.
+Code belongs in the source tree, not in the case directory.
+
+## The broader casebook
+
+Your case is one of many under `docs/casebook/`. Other case directories may
+hold useful historical context — prior investigations, design decisions, or
+previously considered approaches. You can browse them when relevant, but
+usually everything you need is in your own case.
 """
+
+CASEBOOK_README = """\
+This directory is managed by `casebook` and its agents.
+"""
+
 
 def system_instructions(case_id: str) -> str:
     """An agent's bootstrap turn: the full directive plus its case assignment.

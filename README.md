@@ -47,14 +47,12 @@ Full reference, with a worked example of every option:
 ## CLI
 
 ```bash
-casebook init                 # initialize docs/casebook/ in a project
-casebook new -t "Title"       # create a case
-casebook list                 # list cases
-casebook show <id>            # show a case
-casebook serve                # launch the coordinator app (browser UI)
+casebook                      # start daemon + open browser
+casebook /path/to/project     # start daemon + open browser to project
+casebook --fg                 # foreground server + open browser
+casebook --fg --no-browser    # foreground server, no browser
+casebook --stop               # stop running daemon
 ```
-
-`casebook serve` then prints a local URL (default http://127.0.0.1:8765).
 
 ## App
 
@@ -84,7 +82,7 @@ session and its history into it.
 
 Every session runs server-side independent of the browser — all sessions in all
 cases keep running regardless of which pages are open. The terminal running
-`casebook serve` prints when sessions start working and when they all go idle, so
+`casebook` prints when sessions start working and when they all go idle, so
 you can check before quitting. Each session pane shows context/token usage (and
 cost) when the backend reports it over ACP; session-column width is configurable
 (see [docs/configuration/](docs/configuration/README.md#ui-sizing)).

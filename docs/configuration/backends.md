@@ -114,6 +114,6 @@ naming would resolve to `echo`, the app tells you to set `naming_backend`.
 
 ## Verifying
 
-Start `casebook serve` and open a case: configured backends appear in the
+Start `casebook` and open a case: configured backends appear in the
 **+ session** backend picker. If a backend fails to launch, the failure surfaces
 as a toast/notice (e.g. a wrong command or missing binary).

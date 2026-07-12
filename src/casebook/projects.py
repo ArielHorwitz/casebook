@@ -102,6 +102,17 @@ def resolve_project(pid: str) -> Path:
     raise cases.CasebookError(f"unknown project: {pid}")
 
 
+def remove_project(pid: str) -> bool:
+    """Remove a project from the cache by id. Returns True if it was found."""
+    entries = _read_cache()
+    before = len(entries)
+    entries = [entry for entry in entries if entry["id"] != pid]
+    if len(entries) < before:
+        _write_cache(entries)
+        return True
+    return False
+
+
 def touch_project(pid: str) -> Optional[dict]:
     """Update last_opened for a project. Returns the entry or None."""
     entries = _read_cache()

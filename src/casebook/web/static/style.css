@@ -217,6 +217,11 @@ body {
   border-radius: 6px; padding: 6px 14px; cursor: pointer;
 }
 #cd-delete:hover { border-color: #f7768e; color: #f7768e; }
+#pd-remove {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 14px; cursor: pointer;
+}
+#pd-remove:hover { border-color: #f7768e; color: #f7768e; }
 
 #workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #placeholder { color: var(--muted); margin: auto; }

@@ -98,6 +98,15 @@ def create_app(
                 entry["cases"] = 0
         return JSONResponse(entries)
 
+    async def remove_project_endpoint(request: Request) -> JSONResponse:
+        pid = request.path_params["project_id"]
+        if pid in coordinators:
+            await coordinators[pid].shutdown()
+            del coordinators[pid]
+        if projects.remove_project(pid):
+            return JSONResponse({"removed": pid})
+        return JSONResponse({"error": "unknown project"}, status_code=404)
+
     # --- project-scoped case endpoints -----------------------------------
 
     async def cases_endpoint(request: Request) -> JSONResponse:
@@ -193,6 +202,8 @@ def create_app(
         routes=[
             # Project browser
             Route("/api/projects", projects_endpoint, methods=["GET", "POST"]),
+            Route("/api/projects/{project_id}", remove_project_endpoint,
+                  methods=["DELETE"]),
             Route("/api/hotkeys", global_hotkeys),
             # Project-scoped API
             Route("/api/projects/{project_id}/cases", cases_endpoint,

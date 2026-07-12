@@ -839,6 +839,18 @@ function renderProjectDetail(projectId) {
     project.last_opened ? `opened ${new Date(project.last_opened).toLocaleString()}` : null,
   ].filter(Boolean).join("  \u00b7  ");
   el("pd-open").href = projectUrl(projectId);
+  el("pd-remove").onclick = () => removeProject(projectId, project.name);
+}
+
+async function removeProject(projectId, name) {
+  if (!confirm(`Remove "${name}" from the project list?`)) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  if (response.ok) {
+    await loadProjects();
+  } else {
+    const data = await response.json();
+    toast(data.error || "Failed to remove project", "error");
+  }
 }
 
 // Session actions shared by buttons and hotkeys.

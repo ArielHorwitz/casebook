@@ -552,18 +552,8 @@ function renderItem(agentId, item) {
       ts.title = new Date(item.ts).toLocaleString(undefined, { hour12: false });
       header.appendChild(ts);
     }
-    node.appendChild(header);
-    const body = document.createElement("div");
-    if (item.role === "user") {
-      body.className = "content";
-      body.textContent = item.text;
-    } else {
-      body.className = "content markdown";
-      body.innerHTML = renderMarkdown(item.text);
-    }
-    node.appendChild(body);
     if (item.role === "user" && !item.system && item.eventIndex != null) {
-      const actions = document.createElement("div");
+      const actions = document.createElement("span");
       actions.className = "bubble-actions";
       const revertBtn = document.createElement("button");
       revertBtn.className = "revert";
@@ -585,8 +575,18 @@ function renderItem(agentId, item) {
       };
       actions.appendChild(revertBtn);
       actions.appendChild(forkBtn);
-      node.appendChild(actions);
+      header.appendChild(actions);
     }
+    node.appendChild(header);
+    const body = document.createElement("div");
+    if (item.role === "user") {
+      body.className = "content";
+      body.textContent = item.text;
+    } else {
+      body.className = "content markdown";
+      body.innerHTML = renderMarkdown(item.text);
+    }
+    node.appendChild(body);
     if (item.usage) {
       const usageEl = document.createElement("div");
       usageEl.className = "bubble-usage";

@@ -525,8 +525,9 @@ class CaseCoordinator:
         return new_agent_id
 
     async def _apply_models(self, agent_id: str, session: AgentSession) -> None:
-        """Apply the configured default-model preference and publish the model list."""
-        desired = _match_model(self.config.default_model, session.available_models)
+        """Apply the backend's default-model preference and publish the model list."""
+        backend = self.config.select_backend(self._agents[agent_id]["backend"] or None)
+        desired = _match_model(backend.default_model, session.available_models)
         if desired and desired != session.current_model:
             try:
                 await session.set_model(desired)

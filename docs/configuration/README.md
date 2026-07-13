@@ -22,10 +22,9 @@ a backend without redefining the global ones).
 | Key | Type | Default | What it does |
 |---|---|---|---|
 | `default_backend` | string | `"claude"` if available, else `"echo"` | Which backend new sessions use unless one is picked in the UI. |
-| `default_model` | string | — | Preferred model, applied at session start when the backend advertises a match (loose match on model id or name). See [backends.md](backends.md#models). |
 | `naming_prompt` | string | (built-in) | Instructions handed to the model by the "name session" button. |
 | `naming_backend` | string | the session's own backend | Which backend names sessions. `echo` is never used for naming. See [backends.md](backends.md#naming). |
-| `naming_model` | string | — | Model to use for naming (same loose match as `default_model`). |
+| `naming_model` | string | — | Model to use for naming (loose match on model id or name). |
 | `[backends.<name>]` | table | echo + claude (built-in) | Define a launchable ACP agent. Full detail: **[backends.md](backends.md)**. |
 | `[hotkeys]` | table | (built-in) | Rebind keyboard shortcuts. Full detail: **[hotkeys.md](hotkeys.md)**. |
 | `[ui]` | table | `50%`/`320px`/`none` | Session-column sizing — see [UI sizing](#ui-sizing). |
@@ -36,7 +35,6 @@ a backend without redefining the global ones).
 # ~/.config/casebook/config.toml
 
 default_backend = "claude"
-default_model = "sonnet"
 
 # The "name session" button (✨). naming_backend defaults to the session's own
 # backend; echo is never used for naming.
@@ -46,9 +44,11 @@ naming_model = "sonnet"
 
 [backends.claude]
 command = ["claude-code-acp"]
+default_model = "sonnet"
 
 [backends.gemini]
 command = ["gemini", "--experimental-acp"]
+default_model = "gemini-2.5-pro"
 env = { GEMINI_API_KEY = "..." }
 
 [hotkeys]

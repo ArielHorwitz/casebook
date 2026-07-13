@@ -96,6 +96,7 @@ class Backend:
     name: str
     command: list[str]
     env: dict[str, str] = field(default_factory=dict)
+    default_model: Optional[str] = None
 
 
 def global_config_dir() -> Path:
@@ -135,7 +136,6 @@ class Config:
     backends: dict[str, Backend]
     default_backend: str
     naming_prompt: str = DEFAULT_NAMING_PROMPT
-    default_model: Optional[str] = None
     # Which backend/model names sessions. `echo` is never used for naming (it has
     # no language model); when this resolves to echo, naming is unavailable.
     naming_backend: Optional[str] = None
@@ -166,6 +166,7 @@ def _parse_backends(raw: dict) -> dict[str, Backend]:
             name=name,
             command=list(spec["command"]),
             env=dict(spec.get("env", {})),
+            default_model=spec.get("default_model"),
         )
         for name, spec in raw.items()
     }
@@ -211,7 +212,6 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         backends=backends,
         default_backend=default,
         naming_prompt=data.get("naming_prompt", DEFAULT_NAMING_PROMPT),
-        default_model=data.get("default_model"),
         naming_backend=data.get("naming_backend"),
         naming_model=data.get("naming_model"),
         default_always_allow=bool(data.get("default_always_allow", False)),

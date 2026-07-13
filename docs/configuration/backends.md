@@ -27,10 +27,12 @@ the backend picker and can set as `default_backend`.
 |---|---|---|---|
 | `command` | array of strings | yes | The program and its arguments, e.g. `["claude-code-acp"]` or `["gemini", "--experimental-acp"]`. The first element is resolved on `PATH`. |
 | `env` | table of strings | no | Extra environment variables for the subprocess, overlaid on the inherited environment. |
+| `default_model` | string | no | Preferred model, applied at session start when the backend advertises a match (loose match on model id or name). See [Models](#models). |
 
 ```toml
 [backends.example]
 command = ["my-acp-agent", "--flag", "value"]
+default_model = "best-model-3"
 env = { MY_API_KEY = "sk-...", MY_REGION = "eu" }
 ```
 
@@ -65,10 +67,12 @@ default_backend = "gemini"
 # Claude via Zed's adapter (explicit path or just the name if it's on PATH)
 [backends.claude]
 command = ["claude-code-acp"]
+default_model = "sonnet"
 
 # Gemini's experimental ACP mode, with an API key
 [backends.gemini]
 command = ["gemini", "--experimental-acp"]
+default_model = "gemini-2.5-pro"
 env = { GEMINI_API_KEY = "..." }
 
 # Run an adapter through npx if you prefer (a deliberate choice, not a fallback)
@@ -85,13 +89,21 @@ env = { MY_AGENT_TOKEN = "..." }
 
 Once a session is running, the model dropdown lists exactly the models the backend
 **advertises over ACP** (`session/new` → `availableModels`); switching uses ACP
-`session/set_model`. `default_model` (in the top-level config) is applied at
-session start when the backend advertises a matching model (matched
-case-insensitively against the model's id or name).
+`session/set_model`.
+
+Each backend can set a `default_model` — a preferred model applied at session
+start when the backend advertises a match (matched case-insensitively against the
+model's id or name):
+
+```toml
+[backends.claude]
+command = ["claude-code-acp"]
+default_model = "sonnet"
+```
 
 Casebook cannot offer a model the backend doesn't expose. If a backend only
-advertises coarse buckets, that's all ACP makes selectable. To pin a *specific*
-model, define **separate backends**, each launched with that backend's own
+advertises coarse buckets, that's all ACP makes selectable. For finer control,
+define **separate backends**, each launched with that backend's own
 model-selection flags or env — the vendor-specific value lives in your config, and
 casebook stays agnostic:
 

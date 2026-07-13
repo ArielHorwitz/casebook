@@ -14,15 +14,33 @@ to kill the daemon. No subcommands — flags only. Port is auto-selected (base
 9721, increments on conflict) and recorded in `server.json`. See
 `handoff-app-launching-auto-start-and-browser-open.md`.
 
-### 2. Backend installation and configuration
-**Decision:** A known-backends registry (data file bundled with casebook) plus a
-UI for installing, configuring, and managing backends. Includes auto-install with
-user confirmation. See `handoff-backend-installation-and-configuration-ux.md`.
+### 2. Backend installation and configuration — REVISED
+**Original decision:** A known-backends registry (data file bundled with
+casebook) plus a UI for installing, configuring, and managing backends.
+See `handoff-backend-installation-and-configuration-ux.md` for the original
+design.
 
-### 3. Settings page and first-time onboarding
-**Decision:** An in-app settings page covering backends, defaults, hotkeys, and
-UI preferences. First-time onboarding via contextual banners rather than a
-wizard. See `handoff-settings-page-and-first-time-onboarding.md`.
+**Revised decision:** No in-app registry or UI. Configuration stays file-only
+(`config.toml`). Instead, a backends guide document covers common backends with
+full install-and-configure walkthroughs. Users of this tool are expected to be
+comfortable editing config files. The added complexity of a settings UI, config
+writing, install streaming, etc. is not justified.
+
+What *does* survive: a config hot-reload mechanism so editing `config.toml`
+takes effect without restarting the daemon, plus a small UI trigger (button) to
+force a reload.
+
+See `handoff-backends-guide-config-reload-and-per-backend-model.md` for the
+revised implementation handoff.
+
+### 3. Settings page and first-time onboarding — DROPPED
+**Original decision:** An in-app settings page covering backends, defaults,
+hotkeys, and UI preferences. First-time onboarding via contextual banners.
+See `handoff-settings-page-and-first-time-onboarding.md` for the original
+design.
+
+**Dropped:** No settings page. Configuration is file-only. Onboarding is handled
+through documentation (README, backends guide) rather than in-app UI.
 
 ### 4. Friendly installation
 **Decision:** Use `uv tool install git+https://github.com/<owner>/casebook` as

@@ -548,8 +548,8 @@ function renderItem(agentId, item) {
     if (item.ts) {
       const ts = document.createElement("span");
       ts.className = "ts";
-      ts.textContent = new Date(item.ts).toLocaleTimeString();
-      ts.title = new Date(item.ts).toLocaleString();
+      ts.textContent = new Date(item.ts).toLocaleTimeString(undefined, { hour12: false });
+      ts.title = new Date(item.ts).toLocaleString(undefined, { hour12: false });
       header.appendChild(ts);
     }
     node.appendChild(header);
@@ -836,7 +836,7 @@ function renderProjectDetail(projectId) {
   el("pd-path").textContent = project.path;
   el("pd-meta").textContent = [
     `${project.cases || 0} case${project.cases === 1 ? "" : "s"}`,
-    project.last_opened ? `opened ${new Date(project.last_opened).toLocaleString()}` : null,
+    project.last_opened ? `opened ${new Date(project.last_opened).toLocaleString(undefined, { hour12: false })}` : null,
   ].filter(Boolean).join("  \u00b7  ");
   el("pd-open").href = projectUrl(projectId);
   el("pd-remove").onclick = () => removeProject(projectId, project.name);
@@ -1134,7 +1134,7 @@ async function renderCaseDetail(caseId) {
   el("cd-meta").textContent = [
     summary.status,
     `${summary.sessions || 0} session${summary.sessions === 1 ? "" : "s"}`,
-    summary.created ? new Date(summary.created).toLocaleString() : null,
+    summary.created ? new Date(summary.created).toLocaleString(undefined, { hour12: false }) : null,
   ].filter(Boolean).join("  \u00b7  ");
   el("cd-id").textContent = caseId;
   el("cd-keywords").innerHTML = (summary.keywords || []).map((keyword) => `<span class="kw">${keyword}</span>`).join("");

@@ -101,6 +101,13 @@ function setConnection(connected) {
 // --- event handling --------------------------------------------------------
 function handleEvent(event) {
   if (event.type === "snapshot") return applySnapshot(event);
+  if (event.type === "config_changed") {
+    loadHotkeys();
+    loadUi();
+    if (isSessionPage()) loadBackends();
+    toast("Config reloaded");
+    return;
+  }
   if (route.mode === "home") {
     if (event.type === "case_created" || event.type === "case_deleted") loadCases();
     return;
@@ -1250,6 +1257,7 @@ function applyRoute() {
 
   // Connection indicator: hide on project browser (no websocket)
   el("connection").hidden = isProjects;
+  el("reload-config").hidden = isProjects;
 }
 
 // --- wiring ---------------------------------------------------------------
@@ -1261,6 +1269,10 @@ el("file-modal").onclick = (event) => {
 };
 el("hotkey-help-close").onclick = toggleHelp;
 el("hotkey-hint").onclick = toggleHelp;
+el("reload-config").onclick = async () => {
+  await fetch("/api/reload", { method: "POST" });
+};
+
 el("open-project").onclick = () => openProjectPath(el("project-path-input").value);
 el("project-path-input").onkeydown = (event) => {
   if (event.key === "Enter") {

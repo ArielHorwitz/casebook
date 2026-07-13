@@ -185,6 +185,13 @@ def create_app(
         except (cases.CasebookError, OSError) as error:
             return PlainTextResponse(str(error), status_code=404)
 
+    # --- global config reload -----------------------------------------------
+
+    async def reload_config(request: Request) -> JSONResponse:
+        for coordinator in coordinators.values():
+            coordinator.reload_config()
+        return JSONResponse({"reloaded": True})
+
     # --- WebSocket (project-scoped) --------------------------------------
 
     async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -205,6 +212,7 @@ def create_app(
             Route("/api/projects/{project_id}", remove_project_endpoint,
                   methods=["DELETE"]),
             Route("/api/hotkeys", global_hotkeys),
+            Route("/api/reload", reload_config, methods=["POST"]),
             # Project-scoped API
             Route("/api/projects/{project_id}/cases", cases_endpoint,
                   methods=["GET", "POST"]),

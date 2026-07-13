@@ -520,8 +520,19 @@ body {
   min-width: 28px;
 }
 
-#hotkey-hint {
+#reload-config {
   margin-left: auto;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 16px;
+}
+#reload-config:hover { color: var(--text); border-color: var(--accent); }
+
+#hotkey-hint {
   background: var(--panel-2);
   color: var(--muted);
   border: 1px solid var(--border);

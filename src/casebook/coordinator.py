@@ -215,6 +215,11 @@ class CaseCoordinator:
     def ui_config(self) -> dict:
         return dict(self.config.ui)
 
+    def reload_config(self) -> None:
+        """Re-read config from disk and notify connected frontends."""
+        self.config = config.load_config(self.project_root)
+        self._emit({"type": "config_changed"})
+
     def create_case(self, title: str) -> dict:
         """Create a case on disk and announce it so open browsers refresh."""
         case = cases.create_case(self.casebook_root, title or "Unnamed case")

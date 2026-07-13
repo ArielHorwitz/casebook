@@ -1,104 +1,123 @@
 # casebook
 
-A coordinator that connects your filesystem **casebook** (a per-project
-collection of cases — bounded units of work) to configurable **ACP agent
-backends**, so you can work a case start-to-finish in one surface instead of
-copy-pasting a preamble between your editor and a separate agent UI.
+Casebook is a browser-based app for working with AI agents on structured units
+of work called **cases**.
 
-The filesystem is the source of truth. Casebook reflects it; it never becomes a
-competing store of state. See `docs/vision.md` for intent and
-`docs/architecture.md` for the cross-app design.
+## Concepts
 
-## Install
+A **casebook** is a directory of cases in your project (by default
+`docs/casebook/`). Each **case** is a subdirectory containing a metadata file
+(`case.toml`), an overview (`overview.md`), and whatever other files the work
+produces — analysis, designs, reports, code plans, etc. The filesystem is the
+source of truth; casebook reflects it.
+
+A **session** is a conversation with an agent, tied to a case. The agent
+automatically picks up the case's context — its directive, files, and related
+cases — so it's oriented from the start. Multiple sessions can work the same
+case in parallel; they coordinate through the filesystem, not through each
+other.
+
+A **backend** is any command that speaks the
+[Agent Client Protocol](https://agentclientprotocol.com) (ACP) over stdio.
+Casebook is vendor-agnostic — it doesn't know or care which model or vendor is
+behind a backend. You configure backends in a TOML file; casebook launches them
+as subprocesses and talks ACP to them. See
+[docs/configuration/backends.md](docs/configuration/backends.md) for the full
+reference.
+
+## Getting started
+
+### Install casebook
 
 ```bash
-uv pip install -e .
-# Backends are installed explicitly. The Claude backend uses Zed's adapter and
-# is picked up automatically once its binary is on PATH:
-npm install -g @zed-industries/claude-code-acp   # optional
+uv tool install git+https://github.com/<owner>/casebook
 ```
 
-Casebook ships a built-in `echo` backend (an in-tree ACP agent that reflects
-messages back), so the app always runs even with no model installed.
+Or for development:
+
+```bash
+git clone https://github.com/<owner>/casebook
+cd casebook
+uv pip install -e .
+```
+
+### Install a backend
+
+Casebook ships a built-in `echo` backend (reflects your messages back) so the
+app always runs, but you'll want a real agent. The most common backend is
+Claude via Zed's ACP adapter:
+
+```bash
+npm install -g @zed-industries/claude-code-acp
+```
+
+Once `claude-code-acp` is on your `PATH`, casebook detects it automatically —
+no configuration needed. It uses your ambient Anthropic credentials.
+
+For other backends (Gemini, custom agents, etc.), see
+[docs/configuration/backends.md](docs/configuration/backends.md).
+
+### Run casebook
+
+```bash
+casebook                      # start daemon + open browser
+casebook /path/to/project     # open browser to a specific project
+casebook --fg                 # foreground server + open browser
+casebook --fg --no-browser    # foreground server, no browser
+casebook --stop               # stop running daemon
+```
+
+The `casebook` command auto-starts a background daemon if one isn't already
+running, then opens your browser to the UI.
+
+## Using the app
+
+The **home page** lists your cases. Each case opens on its own page, so you can
+keep several cases open in separate browser tabs.
+
+On a **case page**, the sidebar lists that case's sessions and files; the main
+area shows open sessions as side-by-side panes. Create a session with
+**+ session**, pick a backend, and start talking. Each session pane shows the
+conversation, tool-call activity, permission prompts, and context/token usage
+when the backend reports it.
+
+For one-off queries without a case, the **Scratch** page runs caseless
+sessions — plain agents with no case directive. A scratch session can be
+promoted into a new case, migrating its history.
+
+All sessions run server-side, independent of the browser — they keep running
+regardless of which pages are open.
+
+### Keyboard navigation
+
+The app is fully keyboard-drivable. Press `?` or click the **&#x2328;** button to
+see the active bindings. Customize them under `[hotkeys]` in your config (see
+[docs/configuration/hotkeys.md](docs/configuration/hotkeys.md)).
 
 ## Configuration
 
 Casebook reads a single optional TOML file at
-`~/.config/casebook/config.toml` (respecting `$XDG_CONFIG_HOME`), optionally
-overridden per-project in `.casebook/config.toml`. It configures backends, the
-default model, session naming, and keyboard shortcuts:
+`~/.config/casebook/config.toml` (respects `$XDG_CONFIG_HOME`), optionally
+overridden per-project in `.casebook/config.toml`.
 
 ```toml
 default_backend = "claude"
 
 [backends.claude]
 command = ["claude-code-acp"]
+default_model = "sonnet"
+
+[backends.gemini]
+command = ["gemini", "--experimental-acp"]
+default_model = "gemini-2.5-pro"
+env = { GEMINI_API_KEY = "..." }
 ```
 
-Full reference, with a worked example of every option:
+Full reference:
 
-- **[docs/configuration/](docs/configuration/README.md)** — overview and the
-  complete key table.
-- **[docs/configuration/backends.md](docs/configuration/backends.md)** — defining
-  any ACP backend, environment, and pinning a model.
-- **[docs/configuration/hotkeys.md](docs/configuration/hotkeys.md)** — every
-  bindable action and the key-name syntax.
-
-## CLI
-
-```bash
-casebook                      # start daemon + open browser
-casebook /path/to/project     # start daemon + open browser to project
-casebook --fg                 # foreground server + open browser
-casebook --fg --no-browser    # foreground server, no browser
-casebook --stop               # stop running daemon
-```
-
-## App
-
-The app's home page (`/`) lists your cases. Each case opens on its **own page**
-(`/case/<id>`), so you can keep several cases open in separate browser tabs
-alongside the home page — there are no in-app tabs. A case page's sidebar lists
-that case's sessions and files; the main area shows the **open** sessions as
-side-by-side panes.
-
-Create a case (+ case), open it, and start one or more sessions on it
-(+ session) — choosing the backend and, once running, the model. Each session is
-its own ACP session, bootstrapped into the case with the casebook directive
-inlined as its system instructions — no copy-paste (the directive rides along with
-your first message; a new session doesn't speak until you do). Sessions are
-persisted: **close** one and it collapses to the sidebar (subprocess stopped,
-history kept); **open** it again from the sidebar to resume; **delete** removes it
-for good. (When a backend has no native ACP session loading, resume re-sends the
-saved transcript as context on your next message and says so.) Sessions working
-the same case coordinate through the filesystem, not through each other. Edit
-files in your own editor; the app watches the case directory and the agents read
-fresh on their next turn.
-
-For one-off queries, the **Scratch** page (linked from the home page) runs
-**caseless** sessions — plain agents with no case directive and no files panel. A
-scratch session can be **promoted into a new case** (↑ case), migrating the live
-session and its history into it.
-
-Every session runs server-side independent of the browser — all sessions in all
-cases keep running regardless of which pages are open. The terminal running
-`casebook` prints when sessions start working and when they all go idle, so
-you can check before quitting. Each session pane shows context/token usage (and
-cost) when the backend reports it over ACP; session-column width is configurable
-(see [docs/configuration/](docs/configuration/README.md#ui-sizing)).
-
-The app is fully keyboard-drivable. `focus next/prev` move between cases on the
-home page and between sessions on a case page (same keys); **Enter** opens the
-focused case (home) or, on a case page, opens a closed session / focuses the open
-session's input box; **Escape** leaves the input box back to navigation. Plus new
-case/session, rename/name/close/delete, toggle always-allow, and cancel. Press `?`
-or click the ⌨ button to see the bindings; customize them under `[hotkeys]`
-(see [docs/configuration/hotkeys.md](docs/configuration/hotkeys.md)).
-
-The per-session model dropdown lists exactly the models the backend advertises
-over ACP. Casebook is vendor-agnostic and can't offer a model the backend doesn't
-expose — see [docs/configuration/backends.md](docs/configuration/backends.md#models)
-for how to pin a specific model.
-
-See `docs/casebook/` decision notes for the design choices behind the
-implementation.
+- **[Configuration overview](docs/configuration/README.md)** — all keys, merge
+  rules, and a complete example.
+- **[Backends](docs/configuration/backends.md)** — defining backends, the
+  built-ins, environment, models, and worked examples.
+- **[Hotkeys](docs/configuration/hotkeys.md)** — every bindable action, defaults,
+  and key-name syntax.

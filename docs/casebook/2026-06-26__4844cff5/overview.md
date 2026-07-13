@@ -35,8 +35,7 @@ writing, install streaming, etc. is not justified.
   `config_changed` WebSocket event to refetch hotkeys, UI, and backends.
 
 **Remaining:** Expand `docs/configuration/backends.md` with full
-install-and-configure walkthroughs for 2-3 common backends. Update the README
-to improve onboarding. See
+install-and-configure walkthroughs for 2-3 common backends. See
 `handoff-backends-guide-config-reload-and-per-backend-model.md` (item 3) for
 details.
 
@@ -68,6 +67,18 @@ upgrades via `uv tool upgrade casebook`.
   deferred until the project is ready for broader distribution.
 - `pipx install` as an alternative for users without uv — same mechanism, worth
   mentioning in docs.
+
+### 5. README rewrite and doc cleanup — IMPLEMENTED
+**README** rewritten from the ground up for new users who have no prior notion
+of casebook. Covers what casebook is (concepts: cases, sessions, backends, ACP),
+getting started (install, backend setup, running), using the app, and
+configuration with links to the detailed docs. No references to the old CLI
+workflow or preamble copy-pasting.
+
+**Deleted outdated design docs:** `docs/vision.md`, `docs/architecture.md`, and
+`docs/implementation-decisions.md` — all were planning/transition documents from
+the initial rework that no longer reflect the current system. Cleaned up
+source-code comments that referenced them.
 
 ## Deferred
 

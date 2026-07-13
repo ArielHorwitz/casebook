@@ -16,8 +16,7 @@ backends are built in:
     found on PATH. If you want it, install it (``npm install -g
     @zed-industries/claude-code-acp``); casebook will not run it via npx.
 
-This module is a shared-library candidate (see docs/architecture.md): it knows
-nothing about cases.
+This module knows nothing about cases.
 """
 
 from __future__ import annotations

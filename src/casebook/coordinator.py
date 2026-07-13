@@ -1,10 +1,9 @@
 """CaseCoordinator: the casebook-specific brain over the generic engine.
 
-This is the per-app coordination layer from docs/architecture.md. It maps cases
-to their agents, injects the directive as system instructions when an agent is
-spawned, watches case directories so user/agent edits stay visible, and brokers
-the permission round-trip between an agent and the UI. The engine below it knows
-nothing about cases; this layer does.
+Maps cases to their sessions, injects the directive as system instructions when
+a session is spawned, watches case directories so user/agent edits stay visible,
+and brokers the permission round-trip between an agent and the UI. The engine
+below it knows nothing about cases; this layer does.
 """
 
 from __future__ import annotations

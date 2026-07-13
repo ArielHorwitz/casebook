@@ -14,7 +14,7 @@ to kill the daemon. No subcommands — flags only. Port is auto-selected (base
 9721, increments on conflict) and recorded in `server.json`. See
 `handoff-app-launching-auto-start-and-browser-open.md`.
 
-### 2. Backend installation and configuration — REVISED
+### 2. Backend installation and configuration — REVISED, PARTIALLY IMPLEMENTED
 **Original decision:** A known-backends registry (data file bundled with
 casebook) plus a UI for installing, configuring, and managing backends.
 See `handoff-backend-installation-and-configuration-ux.md` for the original
@@ -26,12 +26,19 @@ full install-and-configure walkthroughs. Users of this tool are expected to be
 comfortable editing config files. The added complexity of a settings UI, config
 writing, install streaming, etc. is not justified.
 
-What *does* survive: a config hot-reload mechanism so editing `config.toml`
-takes effect without restarting the daemon, plus a small UI trigger (button) to
-force a reload.
+**Implemented:**
+- **Per-backend `default_model`** — moved from top-level config into each
+  `[backends.*]` table. The top-level `default_model` key is removed. Docs
+  updated in `docs/configuration/`.
+- **Config hot-reload** — `reload_config()` on coordinator, `POST /api/reload`
+  endpoint, reload button (↻) in the topbar. The frontend handles the
+  `config_changed` WebSocket event to refetch hotkeys, UI, and backends.
 
-See `handoff-backends-guide-config-reload-and-per-backend-model.md` for the
-revised implementation handoff.
+**Remaining:** Expand `docs/configuration/backends.md` with full
+install-and-configure walkthroughs for 2-3 common backends. Update the README
+to improve onboarding. See
+`handoff-backends-guide-config-reload-and-per-backend-model.md` (item 3) for
+details.
 
 ### 3. Settings page and first-time onboarding — DROPPED
 **Original decision:** An in-app settings page covering backends, defaults,
@@ -50,10 +57,9 @@ out of the box — users get an isolated venv, the `casebook` CLI on PATH, and
 upgrades via `uv tool upgrade casebook`.
 
 **Prerequisites to verify:**
-- The built wheel must include everything needed at runtime (frontend assets,
-  data files like the backends registry). The current
-  `hatch.build.targets.wheel.packages` only lists `src/casebook`; bundled
-  frontend or data files may need explicit inclusion.
+- The built wheel must include everything needed at runtime (frontend assets).
+  The current `hatch.build.targets.wheel.packages` only lists `src/casebook`;
+  bundled frontend files may need explicit inclusion.
 - A build step (e.g. `justfile` target) should produce frontend assets before
   `uv build` for development/release workflows.
 

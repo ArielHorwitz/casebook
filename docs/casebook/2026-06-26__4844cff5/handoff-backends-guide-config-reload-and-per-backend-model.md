@@ -7,9 +7,10 @@ Configuration stays file-only (`config.toml`).
 
 ## What needs doing
 
-Three things, in rough priority order:
+Three things, in rough priority order. Items 1 and 2 are implemented; item 3
+remains.
 
-### 1. Per-backend `default_model`
+### 1. Per-backend `default_model` — IMPLEMENTED
 
 **Problem:** There's a single top-level `default_model` in the config, but model
 IDs are backend-specific. Setting `default_model = "sonnet"` is meaningless for
@@ -62,7 +63,7 @@ Also update naming: `naming_backend` + `naming_model` stay as top-level keys
 which is a different concern from the session's own default model). No change
 needed there.
 
-### 2. Config hot-reload
+### 2. Config hot-reload — IMPLEMENTED
 
 **Problem:** Config is read once at startup by `CaseCoordinator.__init__`. If a
 user edits `config.toml`, they have to restart the daemon.

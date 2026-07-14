@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import socket
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -116,23 +117,54 @@ def find_running_server() -> Optional[ServerInfo]:
     return None
 
 
-def stop_server() -> bool:
-    """Stop a running daemon. Returns True if a server was stopped."""
+def wait_for_exit(
+    pid: int,
+    port: int,
+    host: str = "127.0.0.1",
+    timeout: float = 5.0,
+    interval: float = 0.05,
+) -> bool:
+    """Wait until the process is gone and its port is released.
+
+    Returns True if both happened within the timeout, False otherwise.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_pid_alive(pid) and not is_port_responding(port, host):
+            return True
+        time.sleep(interval)
+    return False
+
+
+def stop_server(wait: bool = False, timeout: float = 5.0) -> Optional[ServerInfo]:
+    """Stop a running daemon. Returns the stopped server's info, or None.
+
+    With ``wait=True``, blocks until the process has exited and released its
+    port (up to ``timeout``) so a caller can immediately start a replacement.
+    """
     info = read_server_info()
     if info is None:
-        return False
+        return None
     if is_pid_alive(info.pid):
         os.kill(info.pid, signal.SIGTERM)
+        if wait:
+            wait_for_exit(info.pid, info.port, timeout=timeout)
     remove_server_info()
-    return True
+    return info
 
 
 def find_available_port(host: str = "127.0.0.1", base_port: int = 9721) -> int:
-    """Find an available port starting from base_port."""
+    """Find an available port starting from base_port.
+
+    The probe sets ``SO_REUSEADDR`` to match how uvicorn binds its listener, so a
+    port left in ``TIME_WAIT`` by a just-stopped daemon isn't spuriously rejected
+    (this lets ``--restart`` reclaim the same port).
+    """
     for offset in range(100):
         port = base_port + offset
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind((host, port))
                 return port
         except OSError:

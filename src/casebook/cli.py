@@ -6,6 +6,7 @@ Usage:
     casebook --fg                  # foreground server + open browser
     casebook --fg --no-browser     # foreground server, no browser
     casebook --stop                # stop running daemon
+    casebook --restart             # stop running daemon, then start a fresh one
 """
 
 from __future__ import annotations
@@ -100,6 +101,14 @@ def cmd_default(host: str, project_path: str | None) -> None:
     _open_browser(info.port, project_path)
 
 
+def cmd_restart(host: str, project_path: str | None) -> None:
+    """Stop any running daemon, then start a fresh one and open the browser."""
+    stopped = state.stop_server(wait=True)
+    if stopped is not None:
+        print(f"Stopped server on port {stopped.port} (pid {stopped.pid}).")
+    cmd_default(host=host, project_path=project_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="casebook",
@@ -115,6 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Don't open the browser (only with --fg)")
     parser.add_argument("--stop", action="store_true",
                         help="Stop a running daemon")
+    parser.add_argument("--restart", action="store_true",
+                        help="Stop a running daemon, then start a fresh one")
     return parser
 
 
@@ -124,6 +135,8 @@ def main() -> None:
 
     if args.stop:
         cmd_stop()
+    elif args.restart:
+        cmd_restart(host=args.host, project_path=args.project)
     elif args.foreground:
         cmd_foreground(
             host=args.host,

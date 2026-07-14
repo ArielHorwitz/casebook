@@ -64,7 +64,10 @@ function renderMarkdown(text) {
 // --- websocket (project-scoped) -------------------------------------------
 function connect() {
   if (!route.projectId) return; // project browser has no websocket
-  const ws = new WebSocket(`ws://${location.host}/ws/${encodeURIComponent(route.projectId)}`);
+  // Scope the initial snapshot to the case being viewed: session pages only need
+  // their own case's transcripts, not the whole project's. Home pages send none.
+  const query = isSessionPage() ? `?case=${encodeURIComponent(route.caseId)}` : "";
+  const ws = new WebSocket(`ws://${location.host}/ws/${encodeURIComponent(route.projectId)}${query}`);
   state.ws = ws;
   ws.onopen = () => setConnection(true);
   ws.onclose = () => {

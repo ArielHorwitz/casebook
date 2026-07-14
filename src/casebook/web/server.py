@@ -203,7 +203,7 @@ def create_app(
             await websocket.close(code=4000, reason="unknown project")
             return
         await websocket.accept()
-        await _run_socket(websocket, coordinator)
+        await _run_socket(websocket, coordinator, websocket.query_params.get("case"))
 
     return Starlette(
         lifespan=lifespan,
@@ -236,10 +236,12 @@ def create_app(
     )
 
 
-async def _run_socket(websocket: WebSocket, coordinator: CaseCoordinator) -> None:
+async def _run_socket(
+    websocket: WebSocket, coordinator: CaseCoordinator, case_id: str | None
+) -> None:
     """Pump coordinator events out and user actions in until the socket closes."""
     with coordinator.bus.subscribe() as queue:
-        await websocket.send_json(coordinator.snapshot())
+        await websocket.send_json(coordinator.snapshot(case_id))
         sender = asyncio.create_task(_send_events(websocket, queue))
         try:
             while True:

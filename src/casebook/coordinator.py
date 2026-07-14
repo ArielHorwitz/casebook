@@ -794,13 +794,29 @@ class CaseCoordinator:
                         "level": "error", "message": f"file watcher stopped: {error}"})
 
     # --- lifecycle / reconnection ---------------------------------------
-    def snapshot(self) -> dict:
+    def snapshot(self, case_id: Optional[str] = None) -> dict:
+        """State for a connecting browser, scoped to the case it is viewing.
+
+        A session page passes its case_id and gets only that case's sessions —
+        crucially, only their transcripts, which are the bulk of the payload.
+        The home/project pages pass None: they render no sessions, so an empty
+        snapshot is enough (they still receive live case_created/deleted events).
+        """
+        if case_id is None:
+            agents = []
+        else:
+            agents = [a for a in self._agents.values() if a["case_id"] == case_id]
+        agent_ids = {a["agent_id"] for a in agents}
         return {
             "type": "snapshot",
-            "agents": list(self._agents.values()),
-            "transcripts": self._transcripts,
-            "models": self._models,
-            "usage": self._usage,
+            "agents": agents,
+            "transcripts": {
+                aid: events
+                for aid, events in self._transcripts.items()
+                if aid in agent_ids
+            },
+            "models": {aid: m for aid, m in self._models.items() if aid in agent_ids},
+            "usage": {aid: u for aid, u in self._usage.items() if aid in agent_ids},
         }
 
     async def shutdown(self) -> None:

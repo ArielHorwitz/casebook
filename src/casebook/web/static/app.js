@@ -273,6 +273,40 @@ function attachUsageToLastAgentMessage(agentId, event) {
   state.prevUsage.set(agentId, updated);
 }
 
+// Append one replayable transcript event to an items array, coalescing streamed
+// agent message chunks into one bubble and merging tool_call updates by id. This
+// is the single source of truth for both live streaming (applyToTranscript) and
+// bulk replay (applyRawEventToItems), so the two can't render the same transcript
+// differently. Returns true if it consumed the event.
+function appendItem(items, event, eventIndex) {
+  if (event.type === "message") {
+    const last = items[items.length - 1];
+    const streaming = event.role !== "user";
+    if (streaming && last && last.kind === "message" && last.role === event.role && last.streaming) {
+      last.text += event.text;
+    } else {
+      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system, eventIndex, ts: event.ts });
+    }
+    return true;
+  }
+  if (event.type === "tool_call") {
+    const existing = items.find((item) => item.kind === "tool" && item.id === event.tool_call_id);
+    if (existing) {
+      if (event.title) existing.title = event.title;
+      if (event.tool_kind) existing.tool_kind = event.tool_kind;
+      existing.status = event.status || existing.status;
+    } else {
+      items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
+    }
+    return true;
+  }
+  if (event.type === "notice") {
+    items.push({ kind: "notice", message: event.message, level: event.level || "info" });
+    return true;
+  }
+  return false;
+}
+
 function applyToTranscript(event) {
   const agentId = event.agent_id;
   if (event.type === "agent_state") {
@@ -288,27 +322,7 @@ function applyToTranscript(event) {
 
   const eventIndex = state.eventCounts.get(agentId) || 0;
 
-  if (event.type === "message") {
-    const last = items[items.length - 1];
-    const streaming = event.role !== "user";
-    if (streaming && last && last.kind === "message" && last.role === event.role && last.streaming) {
-      last.text += event.text;
-    } else {
-      items.push({ kind: "message", role: event.role, text: event.text, streaming, system: event.system, eventIndex, ts: event.ts });
-    }
-    state.eventCounts.set(agentId, eventIndex + 1);
-  } else if (event.type === "tool_call") {
-    const existing = items.find((item) => item.kind === "tool" && item.id === event.tool_call_id);
-    if (existing) {
-      if (event.title) existing.title = event.title;
-      if (event.tool_kind) existing.tool_kind = event.tool_kind;
-      existing.status = event.status || existing.status;
-    } else {
-      items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
-    }
-    state.eventCounts.set(agentId, eventIndex + 1);
-  } else if (event.type === "notice") {
-    items.push({ kind: "notice", message: event.message, level: event.level || "info" });
+  if (appendItem(items, event, eventIndex)) {
     state.eventCounts.set(agentId, eventIndex + 1);
   } else if (event.type === "permission_request") {
     items.push({ kind: "permission", request_id: event.request_id, tool_call: event.tool_call, options: event.options, resolved: false });
@@ -349,13 +363,8 @@ function applyTranscriptReset(event) {
 }
 
 function applyRawEventToItems(agentId, items, event, eventIndex) {
-  if (event.type === "message") {
-    items.push({ kind: "message", role: event.role, text: event.text, streaming: false, system: event.system, eventIndex, ts: event.ts });
-  } else if (event.type === "tool_call") {
-    items.push({ kind: "tool", id: event.tool_call_id, title: event.title, tool_kind: event.tool_kind, status: event.status });
-  } else if (event.type === "notice") {
-    items.push({ kind: "notice", message: event.message, level: event.level || "info" });
-  } else if (event.type === "usage") {
+  if (appendItem(items, event, eventIndex)) return;
+  if (event.type === "usage") {
     // During replay, attach to the last agent message in the items array built so far.
     // Reuse the same delta logic via attachUsageToLastAgentMessage — it reads from
     // state.transcripts, so temporarily set the items we're building.

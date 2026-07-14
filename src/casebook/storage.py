@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import shutil
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from .cases import format_toml_value
@@ -22,14 +21,6 @@ from .cases import format_toml_value
 SESSIONS_RELATIVE_PATH = ".casebook/sessions"
 META_FILENAME = "meta.toml"
 TRANSCRIPT_FILENAME = "transcript.jsonl"
-
-
-@dataclass
-class StoredSession:
-    """A session loaded from disk: its metadata and its replayed transcript."""
-
-    meta: dict
-    transcript: list[dict] = field(default_factory=list)
 
 
 class SessionStore:
@@ -83,11 +74,17 @@ class SessionStore:
         tmp.write_text("".join(json.dumps(event) + "\n" for event in events))
         tmp.replace(transcript_path)
 
-    def load_all(self) -> list[StoredSession]:
-        """Every persisted session, oldest case/agent directory first."""
+    def load_all_meta(self) -> list[dict]:
+        """Every persisted session's metadata, oldest case/agent directory first.
+
+        Only the small ``meta.toml`` is read — never the transcript, which can be
+        large and is loaded lazily when a session is actually opened (see
+        ``read_transcript``). This keeps startup and reconnection cheap even with
+        thousands of stored sessions.
+        """
         if not self.root.exists():
             return []
-        sessions: list[StoredSession] = []
+        metas: list[dict] = []
         for case_dir in sorted(self.root.iterdir()):
             if not case_dir.is_dir():
                 continue
@@ -95,15 +92,14 @@ class SessionStore:
                 meta_path = session_dir.joinpath(META_FILENAME)
                 if not meta_path.exists():
                     continue
-                sessions.append(
-                    StoredSession(
-                        meta=tomllib.loads(meta_path.read_text()),
-                        transcript=_read_transcript(
-                            session_dir.joinpath(TRANSCRIPT_FILENAME)
-                        ),
-                    )
-                )
-        return sessions
+                metas.append(tomllib.loads(meta_path.read_text()))
+        return metas
+
+    def read_transcript(self, case_id: str, agent_id: str) -> list[dict]:
+        """Read one session's transcript from disk (empty if it has none yet)."""
+        return _read_transcript(
+            self._session_dir(case_id, agent_id).joinpath(TRANSCRIPT_FILENAME)
+        )
 
 
 def _read_transcript(path: Path) -> list[dict]:

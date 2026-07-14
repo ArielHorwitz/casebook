@@ -109,11 +109,13 @@ class CaseCoordinator:
     def load_persisted(self) -> None:
         """Restore every session on disk as a (non-live) stored session.
 
-        Everything on disk is loaded as-is — startup never deletes sessions. (New
-        trivial sessions simply aren't written in the first place; see _emit.)
+        Only metadata is read here — transcripts are loaded lazily when a session
+        is opened (see _ensure_transcript), so this stays cheap no matter how many
+        stored sessions have accumulated. Everything on disk is loaded as-is —
+        startup never deletes sessions. (New trivial sessions simply aren't written
+        in the first place; see _emit.)
         """
-        for stored in self.store.load_all():
-            meta = stored.meta
+        for meta in self.store.load_all_meta():
             agent_id = meta["agent_id"]
             named = bool(meta.get("named", False))
             self._agents[agent_id] = {
@@ -131,7 +133,35 @@ class CaseCoordinator:
             self._created[agent_id] = meta.get("created")
             self._auto_named[agent_id] = not named
             self._persisted.add(agent_id)
-            self._transcripts[agent_id] = list(stored.transcript)
+            # Transcript intentionally left unloaded — read on first open.
+
+    def _ensure_transcript(self, agent_id: str) -> list[dict]:
+        """Return a session's transcript, reading it from disk on first access.
+
+        Stored sessions carry only metadata in memory (see load_persisted); their
+        transcript is loaded lazily the moment something needs it — opening the
+        session, forking, reverting, or naming it. Live sessions already hold their
+        transcript, so this is a no-op for them.
+        """
+        transcript = self._transcripts.get(agent_id)
+        if transcript is None:
+            agent = self._agents.get(agent_id)
+            transcript = (
+                self.store.read_transcript(agent["case_id"], agent_id)
+                if agent is not None
+                else []
+            )
+            self._transcripts[agent_id] = transcript
+        return transcript
+
+    def _evict_transcript(self, agent_id: str) -> None:
+        """Drop a stored session's transcript from memory; disk stays the truth.
+
+        Called when a session collapses back to stored, so a long-running daemon
+        that opens many sessions over its lifetime doesn't accumulate every
+        transcript it has ever touched in memory.
+        """
+        self._transcripts.pop(agent_id, None)
 
     def _should_persist(self, agent_id: str) -> bool:
         """A session is worth saving once it has a message or a custom name."""
@@ -428,6 +458,12 @@ class CaseCoordinator:
         self._acp_ids[agent_id] = session.acp_session_id
         await self._apply_models(agent_id, session)
         self._persist_meta(agent_id)
+        # The client drops a stored session's transcript to keep connect light, so
+        # replay it now that the session is opening and its pane exists. Loading it
+        # here also primes _context_prompt below for non-natively-resumed backends.
+        transcript = self._ensure_transcript(agent_id)
+        self._emit({"type": "transcript_reset", "agent_id": agent_id,
+                    "case_id": agent["case_id"], "transcript": transcript})
         if not loaded:
             # No native session/load: re-send the saved transcript as context on
             # the next message (prefixed with the directive for case sessions).
@@ -490,7 +526,7 @@ class CaseCoordinator:
         agent = self._agents.get(agent_id)
         if agent is None:
             raise cases.CasebookError(f"no such session: {agent_id}")
-        transcript = self._transcripts.get(agent_id, [])
+        transcript = self._ensure_transcript(agent_id)
         if event_index < 0 or event_index >= len(transcript):
             raise cases.CasebookError(f"event_index {event_index} out of range")
         target = transcript[event_index]
@@ -528,7 +564,7 @@ class CaseCoordinator:
         source = self._agents.get(agent_id)
         if source is None:
             raise cases.CasebookError(f"no such session: {agent_id}")
-        transcript = list(self._transcripts.get(agent_id, []))
+        transcript = list(self._ensure_transcript(agent_id))
         if event_index is not None:
             if event_index < 0 or event_index > len(transcript):
                 raise cases.CasebookError(f"event_index {event_index} out of range")
@@ -668,7 +704,7 @@ class CaseCoordinator:
     def _transcript_text(self, agent_id: str, limit: int = 6000) -> str:
         """Plain user/agent text of a session, most recent `limit` characters."""
         lines = []
-        for event in self._transcripts.get(agent_id, []):
+        for event in self._ensure_transcript(agent_id):
             if event.get("type") != "message" or event.get("system"):
                 continue
             role = event.get("role")
@@ -714,6 +750,7 @@ class CaseCoordinator:
             agent["live"] = False
             self._models.pop(agent_id, None)
             self._pending_context.pop(agent_id, None)
+            self._evict_transcript(agent_id)
             self._persist_meta(agent_id)
             self._emit({"type": "agent_updated", **agent})
 

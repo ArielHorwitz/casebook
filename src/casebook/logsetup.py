@@ -1,12 +1,15 @@
 """Central logging configuration for the casebook server process.
 
 One process serves the whole UI, so logging is configured once at server
-startup (see ``web.server.serve``). Everything under the ``casebook`` logger
-writes to a rotating file — the daemon shares a single ``casebook.log`` while
-each foreground instance gets its own ``casebook.<pid>.log`` (see
-``state.log_path`` / ``state.foreground_log_path``). Foreground instances also
-echo to the console; the daemon has no terminal, so it writes to file only and
-lets raw stdout/stderr (crashes, uvicorn) land in ``casebook.err``.
+startup (see ``web.server.serve``), which decides where the log goes:
+
+  - the daemon writes to a shared ``casebook.log`` (see ``state.log_path``) and,
+    having no terminal, logs to file only — raw stdout/stderr (crashes, uvicorn)
+    land in ``casebook.err``;
+  - a user-run foreground instance is for development: it echoes to the console
+    and writes no file by default;
+  - ``CASEBOOK_LOG_PATH`` overrides the destination in either mode, persisting a
+    log at a fixed, findable path.
 
 Call sites fetch a child logger with ``get_logger("coordinator.<project>")`` so
 each line carries its origin.
@@ -18,6 +21,7 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Optional
 
 LOGGER_NAME = "casebook"
 
@@ -36,13 +40,15 @@ def get_logger(name: str = "") -> logging.Logger:
     return root.getChild(name) if name else root
 
 
-def configure(log_file: Path, level: str = "INFO", *, console: bool = True) -> Path:
-    """Attach a rotating file handler (and optionally a console handler).
+def configure(
+    log_file: Optional[Path], level: str = "INFO", *, console: bool = True
+) -> Optional[Path]:
+    """Attach a rotating file handler (when ``log_file`` is given) and/or console.
 
+    ``log_file`` may be None (foreground instances log to the console only).
     Idempotent: repeated calls only adjust the level and leave the existing
     handlers in place, so importing the app in tests can't stack handlers.
     """
-    log_file.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(_resolve_level(level))
     logger.propagate = False  # our own handlers; don't double-log via the root
@@ -50,11 +56,13 @@ def configure(log_file: Path, level: str = "INFO", *, console: bool = True) -> P
         return log_file
 
     formatter = logging.Formatter(_FORMAT, datefmt=_DATE_FORMAT)
-    file_handler = RotatingFileHandler(
-        log_file, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT, encoding="utf-8"
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_file, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT, encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
     if console:
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setFormatter(formatter)

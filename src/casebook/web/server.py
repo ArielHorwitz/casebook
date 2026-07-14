@@ -312,16 +312,23 @@ def serve(
 ) -> None:
     # The daemon (spawned with CASEBOOK_DAEMON=1) is the singleton, discoverable
     # instance: it shares one casebook.log, has no terminal, and owns server.json.
-    # A user-run foreground instance is isolated — its own per-pid log, echoes to
-    # the console, and never touches server.json (so it can't clobber the daemon's
-    # record or race other --fg instances over that single file).
+    # A user-run foreground instance is for development — it echoes to the console
+    # and never touches server.json. It writes no log file by default (console is
+    # enough while you watch it); set CASEBOOK_LOG_PATH to persist one at a fixed,
+    # findable path, which also overrides the daemon's default location.
     daemon = os.environ.get("CASEBOOK_DAEMON") == "1"
-    log_file = state.log_path() if daemon else state.foreground_log_path()
+    override = os.environ.get("CASEBOOK_LOG_PATH")
+    if override:
+        log_file = Path(override)
+    elif daemon:
+        log_file = state.log_path()
+    else:
+        log_file = None  # plain --fg: console only
     level = os.environ.get("CASEBOOK_LOG_LEVEL") or config.log_level()
     logsetup.configure(log_file, level, console=not daemon)
     logsetup.get_logger("server").info(
         "casebook serving on http://%s:%s (pid=%s, log=%s, level=%s)",
-        host, port, os.getpid(), log_file, level,
+        host, port, os.getpid(), log_file or "console only", level,
     )
     app = create_app(
         write_info=daemon,

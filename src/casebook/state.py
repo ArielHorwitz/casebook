@@ -39,15 +39,6 @@ def log_path() -> Path:
     return state_dir().joinpath(LOG_FILENAME)
 
 
-def foreground_log_path(pid: Optional[int] = None) -> Path:
-    """Per-process log for a foreground instance, so parallel runs don't share.
-
-    Foreground instances may run simultaneously (each on its own port), so each
-    gets its own ``casebook.<pid>.log`` rather than clobbering a shared file.
-    """
-    return state_dir().joinpath(f"casebook.{pid or os.getpid()}.log")
-
-
 def daemon_err_path() -> Path:
     """Raw stdout/stderr sink for the daemon (crashes, uvicorn, pre-logging)."""
     return state_dir().joinpath(DAEMON_ERR_FILENAME)

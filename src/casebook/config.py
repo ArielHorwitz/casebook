@@ -12,9 +12,9 @@ backends are built in:
 
   - ``echo``: a tiny in-tree ACP agent that reflects messages back. Always
     available, so the app is runnable with no setup (useful for development).
-  - ``claude``: Zed's ``claude-code-acp`` adapter, but *only* when its binary is
+  - ``claude``: the ``claude-agent-acp`` adapter, but *only* when its binary is
     found on PATH. If you want it, install it (``npm install -g
-    @zed-industries/claude-code-acp``); casebook will not run it via npx.
+    @agentclientprotocol/claude-agent-acp``); casebook will not run it via npx.
 
 This module knows nothing about cases.
 """
@@ -29,8 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CLAUDE_ACP_PACKAGE = "@zed-industries/claude-code-acp"
-CLAUDE_ACP_BIN = "claude-code-acp"
+CLAUDE_ACP_PACKAGE = "@agentclientprotocol/claude-agent-acp"
+CLAUDE_ACP_BIN = "claude-agent-acp"
 
 CONFIG_FILENAME = "config.toml"
 PROJECT_CONFIG_RELATIVE_PATH = ".casebook/config.toml"
@@ -192,7 +192,7 @@ def load_config(project_root: Optional[Path] = None) -> Config:
         default = "claude"
 
         [backends.claude]
-        command = ["claude-code-acp"]
+        command = ["claude-agent-acp"]
 
         [backends.gemini]
         command = ["gemini", "--experimental-acp"]

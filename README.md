@@ -45,13 +45,13 @@ uv pip install -e .
 
 Casebook ships a built-in `echo` backend (reflects your messages back) so the
 app always runs, but you'll want a real agent. The most common backend is
-Claude via Zed's ACP adapter:
+Claude via the `claude-agent-acp` adapter:
 
 ```bash
-npm install -g @zed-industries/claude-code-acp
+npm install -g @agentclientprotocol/claude-agent-acp
 ```
 
-Once `claude-code-acp` is on your `PATH`, casebook detects it automatically —
+Once `claude-agent-acp` is on your `PATH`, casebook detects it automatically —
 no configuration needed. It uses your ambient Anthropic credentials.
 
 For other backends (Gemini, custom agents, etc.), see
@@ -104,7 +104,7 @@ overridden per-project in `.casebook/config.toml`.
 default_backend = "claude"
 
 [backends.claude]
-command = ["claude-code-acp"]
+command = ["claude-agent-acp"]
 default_model = "sonnet"
 
 [backends.gemini]

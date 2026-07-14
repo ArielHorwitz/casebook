@@ -25,7 +25,7 @@ the backend picker and can set as `default_backend`.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `command` | array of strings | yes | The program and its arguments, e.g. `["claude-code-acp"]` or `["gemini", "--experimental-acp"]`. The first element is resolved on `PATH`. |
+| `command` | array of strings | yes | The program and its arguments, e.g. `["claude-agent-acp"]` or `["gemini", "--experimental-acp"]`. The first element is resolved on `PATH`. |
 | `env` | table of strings | no | Extra environment variables for the subprocess, overlaid on the inherited environment. |
 | `default_model` | string | no | Preferred model, applied at session start when the backend advertises a match (loose match on model id or name). See [Models](#models). |
 
@@ -43,10 +43,10 @@ These exist without any config:
 - **`echo`** — a tiny in-tree ACP agent (`python -m casebook.echo_backend`) that
   reflects your messages back. Always available, so the app runs with no setup;
   useful for development. It has no language model (see [Naming](#naming)).
-- **`claude`** — Zed's `claude-code-acp` adapter, **but only if its binary is
+- **`claude`** — the `claude-agent-acp` adapter, **but only if its binary is
   found on `PATH`**. Casebook will not fetch or run it via `npx` — install it
-  explicitly (`npm install -g @zed-industries/claude-code-acp`) and it appears
-  automatically.
+  explicitly (`npm install -g @agentclientprotocol/claude-agent-acp`) and it
+  appears automatically.
 
 Anything you declare under `[backends.*]` is added to these (and overrides a
 built-in of the same name).
@@ -64,9 +64,9 @@ default_backend = "gemini"
 ## Worked examples
 
 ```toml
-# Claude via Zed's adapter (explicit path or just the name if it's on PATH)
+# Claude via the claude-agent-acp adapter (just the name if it's on PATH)
 [backends.claude]
-command = ["claude-code-acp"]
+command = ["claude-agent-acp"]
 default_model = "sonnet"
 
 # Gemini's experimental ACP mode, with an API key
@@ -77,7 +77,7 @@ env = { GEMINI_API_KEY = "..." }
 
 # Run an adapter through npx if you prefer (a deliberate choice, not a fallback)
 [backends.claude-npx]
-command = ["npx", "-y", "@zed-industries/claude-code-acp"]
+command = ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 
 # Any other ACP agent on your machine
 [backends.custom]
@@ -97,7 +97,7 @@ model's id or name):
 
 ```toml
 [backends.claude]
-command = ["claude-code-acp"]
+command = ["claude-agent-acp"]
 default_model = "sonnet"
 ```
 
@@ -117,7 +117,7 @@ command = ["some-acp-agent", "--model", "<deep model the agent understands>"]
 
 Then pick the backend you want from the picker (or set `default_backend`).
 
-## Naming {#naming}
+## Naming
 
 The "name session" button runs a short one-shot query on `naming_backend` (or the
 session's own backend if unset), optionally pinned to `naming_model`. The built-in

@@ -2,7 +2,7 @@
 
 Casebook is configured with a single TOML file. Everything is optional — with no
 config at all, the app runs on the built-in `echo` backend (and the `claude`
-backend too, if `claude-code-acp` is on your `PATH`).
+backend too, if `claude-agent-acp` is on your `PATH`).
 
 ## Where the config lives
 
@@ -43,7 +43,7 @@ naming_backend = "claude"
 naming_model = "sonnet"
 
 [backends.claude]
-command = ["claude-code-acp"]
+command = ["claude-agent-acp"]
 default_model = "sonnet"
 
 [backends.gemini]

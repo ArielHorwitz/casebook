@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Optional
 
 from watchfiles import awatch
 
-from . import cases, config, storage, templates
+from . import cases, config, logsetup, storage, templates
 from .engine import oneshot
 from .engine.events import EventBus
 from .engine.session import AgentSession, SessionManager
@@ -30,6 +31,16 @@ _REPLAYABLE = {"message", "tool_call", "notice", "plan", "usage"}
 # directive, no file watching. Real case ids are `YYYY-MM-DD__hex`, so this never
 # collides. Scratch sessions are persisted under .casebook/sessions/scratch/.
 SCRATCH_CASE_ID = "scratch"
+
+# Event types logged at INFO — the lifecycle/audit trail worth seeing at the
+# default level. Everything else emitted (streaming message chunks, agent_state,
+# tool_call, usage, models, files_changed, agent_updated) is logged at DEBUG.
+# Notices and agent_state turn-boundaries get their own handling in _log_event.
+_LOG_INFO_EVENTS = {
+    "agent_added", "agent_removed", "case_created", "case_deleted",
+    "config_changed", "permission_request", "permission_resolved",
+    "transcript_reset",
+}
 
 
 def _now_iso() -> str:
@@ -68,6 +79,7 @@ def _auto_allow_option(options: list[dict]) -> Optional[str]:
 class CaseCoordinator:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
+        self.log = logsetup.get_logger(f"coordinator.{self.project_root.name}")
         self.casebook_root = self.project_root.joinpath(cases.CASEBOOK_DIR)
         self.config = config.load_config(self.project_root)
         self.store = storage.SessionStore(self.project_root)
@@ -135,6 +147,9 @@ class CaseCoordinator:
         event.setdefault("ts", _now_iso())
         agent_id = event.get("agent_id")
         event_type = event.get("type")
+        # Captured before the agent_state overwrite below so _log_event can
+        # detect the working -> idle boundary (one "turn complete" line per reply).
+        previous_state = self._agents.get(agent_id, {}).get("state") if agent_id else None
         if event_type == "agent_state" and agent_id in self._agents:
             self._agents[agent_id]["state"] = event.get("state")
         if event_type == "usage" and agent_id in self._agents:
@@ -151,14 +166,45 @@ class CaseCoordinator:
                 self._persist_meta(agent_id)
                 self.store.append_event(self._agents[agent_id]["case_id"], agent_id, event)
         self.bus.publish(event)
+        self._log_event(event, event_type, previous_state)
         if event_type in ("agent_state", "agent_added", "agent_updated", "agent_removed"):
             self._report_activity()
 
-    def _report_activity(self) -> None:
-        """Print a console line when the set of busy sessions changes.
+    def _log_event(self, event: dict, event_type: Optional[str],
+                   previous_state: Optional[str]) -> None:
+        """Write one audit line for an emitted event (see _LOG_INFO_EVENTS)."""
+        agent_id = event.get("agent_id")
+        case_id = event.get("case_id")
+        label = self._agents.get(agent_id, {}).get("label") if agent_id else None
+        if event_type == "agent_state":
+            state = event.get("state")
+            # A working -> idle transition is one agent reply finishing: the
+            # "message received" marker (the matching "sent" is the send action).
+            if state == "idle" and previous_state == "working":
+                self.log.info("turn complete: agent=%s label=%s case=%s",
+                              agent_id, label, case_id)
+            else:
+                self.log.debug("agent_state=%s agent=%s label=%s", state, agent_id, label)
+            return
+        if event_type == "notice":
+            self.log.info("notice[%s]: agent=%s case=%s msg=%s",
+                          event.get("level", "info"), agent_id, case_id,
+                          event.get("message"))
+            return
+        level = logging.INFO if event_type in _LOG_INFO_EVENTS else logging.DEBUG
+        detail = ""
+        if event_type == "agent_added":
+            detail = f" label={label!r} backend={event.get('backend')}"
+        elif event_type == "case_created":
+            detail = f" title={event.get('title')!r}"
+        self.log.log(level, "event=%s agent=%s case=%s%s",
+                     event_type, agent_id, case_id, detail)
 
-        Lets you glance at the terminal running `casebook --fg` before Ctrl+C to
-        see whether any session is still working.
+    def _report_activity(self) -> None:
+        """Log a line when the set of busy sessions changes.
+
+        Lets you glance at the terminal running `casebook --fg` (or the log file)
+        before Ctrl+C to see whether any session is still working.
         """
         busy = {
             agent_id
@@ -169,12 +215,12 @@ class CaseCoordinator:
             return
         self._busy_ids = busy
         if not busy:
-            print("[casebook] all sessions idle", flush=True)
+            self.log.info("all sessions idle")
         else:
             running = ", ".join(
                 f"{self._agents[a]['label']} ({self._agents[a]['state']})" for a in busy
             )
-            print(f"[casebook] {len(busy)} session(s) running: {running}", flush=True)
+            self.log.info("%d session(s) running: %s", len(busy), running)
 
     def _persist_meta(self, agent_id: str) -> None:
         if agent_id not in self._agents:

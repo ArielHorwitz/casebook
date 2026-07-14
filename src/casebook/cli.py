@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -45,20 +46,25 @@ def _wait_for_server(timeout: float = 5.0, interval: float = 0.05) -> state.Serv
 
 def _start_daemon(host: str) -> state.ServerInfo:
     """Spawn a background casebook server and wait for it to be ready."""
-    log = state.log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log, "w")  # noqa: SIM115 — kept open for the child's lifetime
+    # Structured logging owns casebook.log; the raw stdout/stderr redirect goes to
+    # a separate file so it can capture crashes and uvicorn output (and anything
+    # before logging is configured) without fighting the rotating file handler.
+    err = state.daemon_err_path()
+    err.parent.mkdir(parents=True, exist_ok=True)
+    err_file = open(err, "w")  # noqa: SIM115 — kept open for the child's lifetime
 
     subprocess.Popen(
         [sys.executable, "-m", "casebook", "--fg", "--no-browser", "--host", host],
         start_new_session=True,
-        stdout=log_file,
-        stderr=log_file,
+        stdout=err_file,
+        stderr=err_file,
+        env={**os.environ, "CASEBOOK_DAEMON": "1"},
     )
 
     info = _wait_for_server()
     if info is None:
-        print(f"Server failed to start. Check logs at {log}", file=sys.stderr)
+        print(f"Server failed to start. Check logs at {state.log_path()} "
+              f"(errors: {err})", file=sys.stderr)
         sys.exit(1)
     return info
 

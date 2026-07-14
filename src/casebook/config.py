@@ -38,6 +38,10 @@ PROJECT_CONFIG_RELATIVE_PATH = ".casebook/config.toml"
 ECHO_BACKEND_NAME = "echo"
 CLAUDE_BACKEND_NAME = "claude"
 
+# Default logging verbosity. Override with a top-level `log_level = "DEBUG"` in
+# the global config, or the CASEBOOK_LOG_LEVEL environment variable.
+DEFAULT_LOG_LEVEL = "INFO"
+
 # The instructions handed to the model when asked to name a session. Override it
 # in config.toml with a top-level `naming_prompt = "..."`.
 DEFAULT_NAMING_PROMPT = (
@@ -222,4 +226,14 @@ def global_hotkeys() -> dict:
     """Hotkeys from global config only (no project overrides)."""
     data = _read_toml(global_config_path())
     return {**DEFAULT_HOTKEYS, **data.get('hotkeys', {})}
+
+
+def log_level() -> str:
+    """Log level from global config only (top-level `log_level`).
+
+    Logging is a process-global concern set up once at server startup, so it is
+    read from the global config rather than any per-project override.
+    """
+    data = _read_toml(global_config_path())
+    return str(data.get("log_level", DEFAULT_LOG_LEVEL))
 

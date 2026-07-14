@@ -10,6 +10,7 @@ path cache.
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .. import cases, config, projects
+from .. import cases, config, logsetup, projects, state
 from ..coordinator import CaseCoordinator
 
 STATIC_DIR = Path(__file__).parent.joinpath("static")
@@ -258,6 +259,10 @@ async def _send_events(websocket: WebSocket, queue: asyncio.Queue) -> None:
 
 def _dispatch(coordinator: CaseCoordinator, action: dict) -> None:
     name = action.get("action")
+    # The inbound audit trail: every user action, no message content. This is the
+    # line that shows what a stray keypress actually triggered.
+    coordinator.log.info("action=%s agent=%s case=%s", name,
+                         action.get("agent_id"), action.get("case_id"))
     if name == "add_agent":
         _spawn(coordinator.add_agent(action["case_id"], action.get("label"),
                                      action.get("backend")))
@@ -306,7 +311,17 @@ def serve(
     open_browser: bool = False,
     project_path: str | None = None,
 ) -> None:
-    print(f"casebook serving on http://{host}:{port}")
+    # The daemon (spawned with CASEBOOK_DAEMON=1) shares one casebook.log and has
+    # no terminal; a user-run foreground instance gets its own per-pid log and
+    # echoes to the console.
+    daemon = os.environ.get("CASEBOOK_DAEMON") == "1"
+    log_file = state.log_path() if daemon else state.foreground_log_path()
+    level = os.environ.get("CASEBOOK_LOG_LEVEL") or config.log_level()
+    logsetup.configure(log_file, level, console=not daemon)
+    logsetup.get_logger("server").info(
+        "casebook serving on http://%s:%s (pid=%s, log=%s, level=%s)",
+        host, port, os.getpid(), log_file, level,
+    )
     app = create_app(
         write_info=write_info,
         open_browser=open_browser,

@@ -30,13 +30,13 @@ reference.
 ### Install casebook
 
 ```bash
-uv tool install git+https://github.com/<owner>/casebook
+uv tool install git+https://github.com/ArielHorwitz/casebook
 ```
 
 Or for development:
 
 ```bash
-git clone https://github.com/<owner>/casebook
+git clone https://github.com/ArielHorwitz/casebook
 cd casebook
 uv pip install -e .
 ```

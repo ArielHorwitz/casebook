@@ -192,7 +192,8 @@ function upsertAgent(agent) {
   } else {
     removePaneOnly(agent.agent_id);
   }
-  if (isNew) {
+  const shouldFocus = !state._snapshotLoading && (isNew || (agent.live && agent.agent_id === state.sidebarFocusedAgent));
+  if (shouldFocus) {
     state.sidebarFocusedAgent = agent.agent_id;
     if (agent.live) state.paneFocusedAgent = agent.agent_id;
   } else {
@@ -201,8 +202,9 @@ function upsertAgent(agent) {
   }
   renderSessionList();
   applyFocusVisibility();
-  if (isNew && agent.live) {
+  if (shouldFocus && agent.live) {
     scrollSidebarToFocused();
+    state.focusRegion = "panes";
     const pane = state.panes.get(agent.agent_id);
     if (pane) {
       pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
@@ -705,12 +707,16 @@ function activateSession(agentId) {
   const agent = state.agents.get(agentId);
   if (!agent) return;
   state.sidebarFocusedAgent = agentId;
-  state.focusRegion = "sidebar";
   if (agent.live) {
     state.paneFocusedAgent = agentId;
+    state.focusRegion = "panes";
     const pane = state.panes.get(agentId);
-    if (pane) pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+    if (pane) {
+      pane.root.scrollIntoView({ inline: "nearest", block: "nearest" });
+      pane.input.focus();
+    }
   } else {
+    state.focusRegion = "sidebar";
     send({ action: "resume_agent", agent_id: agentId });
   }
   applyFocusVisibility();

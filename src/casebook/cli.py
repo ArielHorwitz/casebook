@@ -79,15 +79,16 @@ def cmd_stop() -> None:
 
 
 def cmd_foreground(host: str, open_browser: bool, project_path: str | None) -> None:
-    """Run the server in the foreground."""
+    """Run the server in the foreground.
+
+    Whether this instance owns ``server.json`` is decided inside ``serve()`` by
+    the ``CASEBOOK_DAEMON`` marker: the spawned daemon is the singleton, a
+    user-run ``--fg`` is isolated and touches no shared state.
+    """
     from .web.server import serve
 
     port = state.find_available_port(host=host)
-    if open_browser:
-        # We schedule the browser open via uvicorn's startup event inside serve().
-        pass
-    serve(host=host, port=port, write_info=True, open_browser=open_browser,
-          project_path=project_path)
+    serve(host=host, port=port, open_browser=open_browser, project_path=project_path)
 
 
 def cmd_default(host: str, project_path: str | None) -> None:

@@ -307,13 +307,14 @@ async def _guard(coro) -> None:
 def serve(
     host: str = "127.0.0.1",
     port: int = 9721,
-    write_info: bool = False,
     open_browser: bool = False,
     project_path: str | None = None,
 ) -> None:
-    # The daemon (spawned with CASEBOOK_DAEMON=1) shares one casebook.log and has
-    # no terminal; a user-run foreground instance gets its own per-pid log and
-    # echoes to the console.
+    # The daemon (spawned with CASEBOOK_DAEMON=1) is the singleton, discoverable
+    # instance: it shares one casebook.log, has no terminal, and owns server.json.
+    # A user-run foreground instance is isolated — its own per-pid log, echoes to
+    # the console, and never touches server.json (so it can't clobber the daemon's
+    # record or race other --fg instances over that single file).
     daemon = os.environ.get("CASEBOOK_DAEMON") == "1"
     log_file = state.log_path() if daemon else state.foreground_log_path()
     level = os.environ.get("CASEBOOK_LOG_LEVEL") or config.log_level()
@@ -323,7 +324,7 @@ def serve(
         host, port, os.getpid(), log_file, level,
     )
     app = create_app(
-        write_info=write_info,
+        write_info=daemon,
         open_browser=open_browser,
         bound_port=port,
         project_path=project_path,

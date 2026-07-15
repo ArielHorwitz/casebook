@@ -21,7 +21,6 @@ from dataclasses import dataclass
 
 SERVER_INFO_FILENAME = "server.json"
 LOG_FILENAME = "casebook.log"
-DAEMON_ERR_FILENAME = "casebook.err"
 
 
 def state_dir() -> Path:
@@ -36,13 +35,8 @@ def server_info_path() -> Path:
 
 
 def log_path() -> Path:
-    """Structured log for the shared daemon (single instance)."""
+    """Unified daemon log: structured events plus raw crash/uvicorn output."""
     return state_dir().joinpath(LOG_FILENAME)
-
-
-def daemon_err_path() -> Path:
-    """Raw stdout/stderr sink for the daemon (crashes, uvicorn, pre-logging)."""
-    return state_dir().joinpath(DAEMON_ERR_FILENAME)
 
 
 @dataclass(frozen=True)

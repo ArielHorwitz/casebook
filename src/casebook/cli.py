@@ -47,25 +47,25 @@ def _wait_for_server(timeout: float = 5.0, interval: float = 0.05) -> state.Serv
 
 def _start_daemon(host: str) -> state.ServerInfo:
     """Spawn a background casebook server and wait for it to be ready."""
-    # Structured logging owns casebook.log; the raw stdout/stderr redirect goes to
-    # a separate file so it can capture crashes and uvicorn output (and anything
-    # before logging is configured) without fighting the rotating file handler.
-    err = state.daemon_err_path()
-    err.parent.mkdir(parents=True, exist_ok=True)
-    err_file = open(err, "w")  # noqa: SIM115 — kept open for the child's lifetime
+    # The detached daemon has no terminal, so redirect its stdout/stderr into the
+    # log. Structured events (via the logger's stream handler), uvicorn output,
+    # and any pre-logging crash all land in this one file, in order. Append so a
+    # crash log survives across restarts. CASEBOOK_LOG_PATH overrides the path.
+    log = Path(os.environ.get("CASEBOOK_LOG_PATH") or state.log_path())
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log, "a")  # noqa: SIM115 — kept open for the child's lifetime
 
     subprocess.Popen(
         [sys.executable, "-m", "casebook", "--fg", "--no-browser", "--host", host],
         start_new_session=True,
-        stdout=err_file,
-        stderr=err_file,
+        stdout=log_file,
+        stderr=log_file,
         env={**os.environ, "CASEBOOK_DAEMON": "1"},
     )
 
     info = _wait_for_server()
     if info is None:
-        print(f"Server failed to start. Check logs at {state.log_path()} "
-              f"(errors: {err})", file=sys.stderr)
+        print(f"Server failed to start. Check logs at {log}", file=sys.stderr)
         sys.exit(1)
     return info
 

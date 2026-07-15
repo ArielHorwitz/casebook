@@ -313,24 +313,25 @@ def serve(
     project_path: str | None = None,
 ) -> None:
     # The daemon (spawned with CASEBOOK_DAEMON=1) is the singleton, discoverable
-    # instance: it shares one casebook.log, has no terminal, and owns server.json.
-    # A user-run foreground instance is for development — it echoes to the console
-    # and never touches server.json. It writes no log file by default (console is
-    # enough while you watch it); set CASEBOOK_LOG_PATH to persist one at a fixed,
-    # findable path, which also overrides the daemon's default location.
+    # instance: it owns server.json and has no terminal, so the parent redirects
+    # its stdout/stderr into one log file — our stream handler writes there too,
+    # unifying structured events and raw crash/uvicorn output. A user-run
+    # foreground instance is for development: it echoes to the console and, unless
+    # CASEBOOK_LOG_PATH names a file, writes none (the console is enough live).
     daemon = os.environ.get("CASEBOOK_DAEMON") == "1"
     override = os.environ.get("CASEBOOK_LOG_PATH")
-    if override:
-        log_file = Path(override)
-    elif daemon:
-        log_file = state.log_path()
+    if daemon:
+        # The parent's redirect owns the file; we just stream into it.
+        log_file = None
+        destination = override or str(state.log_path())
     else:
-        log_file = None  # plain --fg: console only
+        log_file = Path(override) if override else None
+        destination = str(log_file) if log_file else "console only"
     level = os.environ.get("CASEBOOK_LOG_LEVEL") or config.log_level()
-    logsetup.configure(log_file, level, console=not daemon)
+    logsetup.configure(log_file, level)
     logsetup.get_logger("server").info(
         "casebook serving on http://%s:%s (pid=%s, log=%s, level=%s)",
-        host, port, os.getpid(), log_file or "console only", level,
+        host, port, os.getpid(), destination, level,
     )
     app = create_app(
         write_info=daemon,

@@ -1,15 +1,16 @@
 """Central logging configuration for the casebook server process.
 
 One process serves the whole UI, so logging is configured once at server
-startup (see ``web.server.serve``), which decides where the log goes:
+startup (see ``web.server.serve``). Everything goes through a stream handler on
+stderr; where that ends up depends on the mode:
 
-  - the daemon writes to a shared ``casebook.log`` (see ``state.log_path``) and,
-    having no terminal, logs to file only — raw stdout/stderr (crashes, uvicorn)
-    land in ``casebook.err``;
-  - a user-run foreground instance is for development: it echoes to the console
-    and writes no file by default;
-  - ``CASEBOOK_LOG_PATH`` overrides the destination in either mode, persisting a
-    log at a fixed, findable path.
+  - the daemon has no terminal, so the parent redirects its stdout/stderr into a
+    single ``casebook.log`` (see ``state.log_path``) — the stream handler's
+    output lands there alongside raw crash/uvicorn output, in one ordered file;
+  - a user-run foreground instance is for development: stderr is its terminal,
+    and it adds a rotating file handler only when ``CASEBOOK_LOG_PATH`` names one;
+  - ``CASEBOOK_LOG_PATH`` persists a log at a fixed, findable path (the daemon's
+    redirect target, or a foreground file handler).
 
 Call sites fetch a child logger with ``get_logger("coordinator.<project>")`` so
 each line carries its origin.

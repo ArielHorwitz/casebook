@@ -55,6 +55,7 @@ def create_app(
         try:
             yield
         finally:
+            log.info("server shutting down (%d project(s) active)", len(coordinators))
             if write_info:
                 from .. import state
                 state.remove_server_info()
@@ -74,6 +75,18 @@ def create_app(
         projects.touch_project(project_id)
         return coordinator
 
+    def coordinator_or_404(project_id: str):
+        """``(coordinator, None)`` for a known project, else ``(None, response)``.
+
+        Logs the miss at DEBUG — usually a stale browser tab pointed at a project
+        the daemon no longer knows; benign, but otherwise an invisible 404.
+        """
+        try:
+            return get_coordinator(project_id), None
+        except cases.CasebookError as error:
+            log.debug("no coordinator for project=%s: %s", project_id, error)
+            return None, JSONResponse({"error": str(error)}, status_code=404)
+
     # --- HTML (single document for all client-side routes) ---------------
 
     async def index(_request: Request) -> FileResponse:
@@ -92,6 +105,10 @@ def create_app(
                 entry["cases"] = len(coordinator.list_cases())
                 return JSONResponse(entry, status_code=201)
             except cases.CasebookError as error:
+                # projects.open_project already WARNs the common failure (bad
+                # path); keep a boundary trace for the rarer coordinator-create
+                # failure without double-warning.
+                log.debug("POST /api/projects failed: path=%s: %s", path, error)
                 return JSONResponse({"error": str(error)}, status_code=400)
         # GET: list projects with case counts.
         entries = projects.list_projects()
@@ -99,7 +116,11 @@ def create_app(
             try:
                 coordinator = get_coordinator(entry["id"])
                 entry["cases"] = len(coordinator.list_cases())
-            except cases.CasebookError:
+            except cases.CasebookError as error:
+                # A registered project that no longer loads would otherwise show a
+                # silent 0 on the home screen, indistinguishable from "empty".
+                log.warning("project failed to load, listing 0 cases: id=%s: %s",
+                            entry["id"], error)
                 entry["cases"] = 0
         return JSONResponse(entries)
 
@@ -108,18 +129,17 @@ def create_app(
         if pid in coordinators:
             await coordinators[pid].shutdown()
             del coordinators[pid]
-        if projects.remove_project(pid):
+        if projects.remove_project(pid):  # logs the removal itself
             return JSONResponse({"removed": pid})
+        log.warning("remove project: unknown id=%s", pid)
         return JSONResponse({"error": "unknown project"}, status_code=404)
 
     # --- project-scoped case endpoints -----------------------------------
 
     async def cases_endpoint(request: Request) -> JSONResponse:
-        pid = request.path_params["project_id"]
-        try:
-            coordinator = get_coordinator(pid)
-        except cases.CasebookError as error:
-            return JSONResponse({"error": str(error)}, status_code=404)
+        coordinator, error = coordinator_or_404(request.path_params["project_id"])
+        if error is not None:
+            return error
         if request.method == "POST":
             body = await request.json()
             summary = coordinator.create_case(body.get("title", "Unnamed case"))
@@ -127,44 +147,39 @@ def create_app(
         return JSONResponse(coordinator.list_cases())
 
     async def promote(request: Request) -> JSONResponse:
-        pid = request.path_params["project_id"]
-        try:
-            coordinator = get_coordinator(pid)
-        except cases.CasebookError as error:
-            return JSONResponse({"error": str(error)}, status_code=404)
+        coordinator, error = coordinator_or_404(request.path_params["project_id"])
+        if error is not None:
+            return error
         body = await request.json()
+        agent_id = body["agent_id"]
         new_case_id = await coordinator.promote_agent(
-            body["agent_id"], body.get("title", "Unnamed case")
+            agent_id, body.get("title", "Unnamed case")
         )
         if new_case_id is None:
+            log.debug("promote: agent=%s is not a scratch session", agent_id)
             return JSONResponse({"error": "not a scratch session"}, status_code=400)
+        log.info("promoted agent=%s to case=%s", agent_id, new_case_id)
         return JSONResponse({"case_id": new_case_id}, status_code=201)
 
     async def list_backends(request: Request) -> JSONResponse:
-        pid = request.path_params["project_id"]
-        try:
-            coordinator = get_coordinator(pid)
-        except cases.CasebookError as error:
-            return JSONResponse({"error": str(error)}, status_code=404)
+        coordinator, error = coordinator_or_404(request.path_params["project_id"])
+        if error is not None:
+            return error
         return JSONResponse(coordinator.list_backends())
 
     async def global_hotkeys(_request: Request) -> JSONResponse:
         return JSONResponse(config.global_hotkeys())
 
     async def hotkeys(request: Request) -> JSONResponse:
-        pid = request.path_params["project_id"]
-        try:
-            coordinator = get_coordinator(pid)
-        except cases.CasebookError as error:
-            return JSONResponse({"error": str(error)}, status_code=404)
+        coordinator, error = coordinator_or_404(request.path_params["project_id"])
+        if error is not None:
+            return error
         return JSONResponse(coordinator.hotkeys())
 
     async def ui_config(request: Request) -> JSONResponse:
-        pid = request.path_params["project_id"]
-        try:
-            coordinator = get_coordinator(pid)
-        except cases.CasebookError as error:
-            return JSONResponse({"error": str(error)}, status_code=404)
+        coordinator, error = coordinator_or_404(request.path_params["project_id"])
+        if error is not None:
+            return error
         return JSONResponse(coordinator.ui_config())
 
     async def case_detail(request: Request) -> JSONResponse:
@@ -173,26 +188,28 @@ def create_app(
         try:
             coordinator = get_coordinator(pid)
             if request.method == "DELETE":
-                await coordinator.delete_case(case_id)
+                await coordinator.delete_case(case_id)  # logs the deletion itself
                 return JSONResponse({"deleted": case_id})
             return JSONResponse(coordinator.case_detail(case_id))
         except cases.CasebookError as error:
+            log.debug("case %s (project=%s) request failed: %s", case_id, pid, error)
             return JSONResponse({"error": str(error)}, status_code=404)
 
     async def case_file(request: Request):
         pid = request.path_params["project_id"]
+        filename = request.path_params["filename"]
         try:
             coordinator = get_coordinator(pid)
-            content = coordinator.read_case_file(
-                request.path_params["case_id"], request.path_params["filename"]
-            )
+            content = coordinator.read_case_file(request.path_params["case_id"], filename)
             return PlainTextResponse(content)
         except (cases.CasebookError, OSError) as error:
+            log.debug("case file %s (project=%s) request failed: %s", filename, pid, error)
             return PlainTextResponse(str(error), status_code=404)
 
     # --- global config reload -----------------------------------------------
 
     async def reload_config(request: Request) -> JSONResponse:
+        log.info("config reload requested for %d project(s)", len(coordinators))
         for coordinator in coordinators.values():
             coordinator.reload_config()
         return JSONResponse({"reloaded": True})
@@ -320,6 +337,8 @@ def _dispatch(coordinator: CaseCoordinator, action: dict) -> None:
         _spawn(coordinator.revert_agent(action["agent_id"], action["event_index"]))
     elif name == "fork_agent":
         _spawn(coordinator.fork_agent(action["agent_id"], action.get("event_index")))
+    else:
+        coordinator.log.warning("ignoring unknown action: %s", name)
 
 
 def _spawn(coro) -> None:

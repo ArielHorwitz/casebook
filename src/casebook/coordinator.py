@@ -292,6 +292,7 @@ class CaseCoordinator:
 
     def reload_config(self) -> None:
         """Re-read config from disk and notify connected frontends."""
+        self.log.info("reloading config from disk")
         self.config = config.load_config(self.project_root)
         self._emit({"type": "config_changed"})
 
@@ -306,7 +307,11 @@ class CaseCoordinator:
         """Delete a case: stop and erase its sessions, then remove the directory."""
         case = cases.resolve_case(self.casebook_root, case_id)
         cid = case.case_id
-        for agent_id in [aid for aid, a in self._agents.items() if a["case_id"] == cid]:
+        doomed = [aid for aid, a in self._agents.items() if a["case_id"] == cid]
+        # Destructive and irreversible (rmtree below): log it plainly before the
+        # fact, with the session count, so an accidental delete leaves a trace.
+        self.log.info("deleting case=%s (%d session(s)) at %s", cid, len(doomed), case.path)
+        for agent_id in doomed:
             await self.delete_agent(agent_id)
         watcher = self._watchers.pop(cid, None)
         if watcher is not None:
@@ -766,6 +771,13 @@ class CaseCoordinator:
 
     async def delete_agent(self, agent_id: str) -> None:
         """Stop (if live) and erase the session and its stored history."""
+        existing = self._agents.get(agent_id)
+        if existing is not None:
+            # Destructive (drops the on-disk transcript): log with context before
+            # the state is torn down. Covers WS, REST, and cascade-from-delete_case.
+            self.log.info("deleting session=%s label=%s case=%s live=%s",
+                          agent_id, existing.get("label"), existing.get("case_id"),
+                          existing.get("live"))
         session = self.sessions.pop(agent_id)
         agent = self._agents.pop(agent_id, None)
         self._transcripts.pop(agent_id, None)

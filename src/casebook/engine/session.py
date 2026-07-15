@@ -220,6 +220,9 @@ class AgentSession:
             )
             self._report_usage(getattr(response, "usage", None))
         except Exception as error:  # surface, don't crash the engine
+            # The user sees the summary as a notice; keep the traceback for DEBUG
+            # so a backend/protocol failure mid-turn is diagnosable.
+            log.debug("prompt failed for agent=%s", self.agent_id, exc_info=True)
             self._notify(f"agent error: {error}", level="error")
         finally:
             self._busy = False

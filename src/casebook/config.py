@@ -29,6 +29,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from . import logsetup
+
+log = logsetup.get_logger("config")
+
 CLAUDE_ACP_PACKAGE = "@agentclientprotocol/claude-agent-acp"
 CLAUDE_ACP_BIN = "claude-agent-acp"
 
@@ -129,6 +133,8 @@ def builtin_backends() -> dict[str, Backend]:
         backends[CLAUDE_BACKEND_NAME] = Backend(
             name=CLAUDE_BACKEND_NAME, command=[claude_binary]
         )
+    else:
+        log.debug("claude backend not detected (%s not on PATH)", CLAUDE_ACP_BIN)
     return backends
 
 
@@ -160,7 +166,14 @@ class Config:
 def _read_toml(path: Path) -> dict:
     if not path.exists():
         return {}
-    return tomllib.loads(path.read_text())
+    try:
+        return tomllib.loads(path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as error:
+        # A malformed config is a top user-facing failure (e.g. a hand-edited or
+        # copied config.toml); name the file and the parse error rather than
+        # letting a bare traceback bubble up from wherever the config was read.
+        log.warning("failed to read config %s: %s", path, error)
+        raise
 
 
 def _parse_backends(raw: dict) -> dict[str, Backend]:
@@ -211,6 +224,8 @@ def load_config(project_root: Optional[Path] = None) -> Config:
     if default is None:
         # Prefer a real backend (claude) when present; fall back to echo.
         default = CLAUDE_BACKEND_NAME if CLAUDE_BACKEND_NAME in backends else ECHO_BACKEND_NAME
+    log.debug("config loaded (project=%s): backends=%s default=%s",
+              project_root, sorted(backends), default)
     return Config(
         backends=backends,
         default_backend=default,

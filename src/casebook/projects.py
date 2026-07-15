@@ -16,8 +16,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import cases, config
+from . import cases, config, logsetup
 
+log = logsetup.get_logger("projects")
 
 CACHE_FILENAME = "projects.json"
 
@@ -38,7 +39,10 @@ def _read_cache() -> list[dict]:
         return []
     try:
         return json.loads(cache_file.read_text())
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as error:
+        # A corrupt cache would otherwise silently present as "no projects" —
+        # every registered project vanishing from the home screen at once.
+        log.warning("could not read project cache %s: %s", cache_file, error)
         return []
 
 
@@ -68,8 +72,10 @@ def open_project(path: Path) -> dict:
     """Validate and upsert a project path into the cache. Returns the entry."""
     resolved = path.resolve()
     if not resolved.is_dir():
+        log.warning("refused to open project, not a directory: %s", resolved)
         raise cases.CasebookError(f"directory does not exist: {resolved}")
     pid = project_id(resolved)
+    log.info("open project: id=%s path=%s", pid, resolved)
     now = datetime.now().isoformat()
     entries = _read_cache()
     for entry in entries:
@@ -109,6 +115,7 @@ def remove_project(pid: str) -> bool:
     entries = [entry for entry in entries if entry["id"] != pid]
     if len(entries) < before:
         _write_cache(entries)
+        log.info("removed project: id=%s", pid)
         return True
     return False
 

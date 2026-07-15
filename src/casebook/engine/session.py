@@ -21,8 +21,11 @@ from acp import PROTOCOL_VERSION, spawn_agent_process, text_block
 from acp.interfaces import ClientCapabilities, Implementation
 from acp.schema import FileSystemCapabilities
 
+from .. import logsetup
 from ..config import Backend
 from .client import AgentClient, Emit, PermissionRequester
+
+log = logsetup.get_logger("engine.session")
 
 CLIENT_CAPABILITIES = ClientCapabilities(
     fs=FileSystemCapabilities(read_text_file=True, write_text_file=True),
@@ -106,6 +109,11 @@ class AgentSession:
         # (not the trimmed MCP default) so it keeps PATH and ambient auth.
         environment = {**os.environ, **self.backend.env}
         command, *args = self.backend.command
+        # The command is logged before the spawn so that if it fails (backend not
+        # on PATH, non-executable, immediate crash) the log names exactly what was
+        # attempted — the single most common backend-setup failure.
+        log.debug("spawning backend %s: %s (cwd=%s)",
+                  self.backend.name, [command, *args], self.project_root)
         conn, _process = await self._stack.enter_async_context(
             spawn_agent_process(
                 client,
@@ -129,6 +137,8 @@ class AgentSession:
         )
         capabilities = getattr(initialized, "agent_capabilities", None)
         self._supports_load = bool(getattr(capabilities, "load_session", False))
+        log.debug("backend %s initialized (agent=%s, load_session=%s)",
+                  self.backend.name, self.agent_id, self._supports_load)
 
     async def start(self) -> None:
         """Spawn the agent and open a fresh session, ready and idle.

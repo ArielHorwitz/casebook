@@ -16,6 +16,10 @@ from acp import ReadTextFileResponse, RequestPermissionResponse, WriteTextFileRe
 from acp.interfaces import Client
 from acp.schema import AllowedOutcome, DeniedOutcome
 
+from .. import logsetup
+
+log = logsetup.get_logger("engine.client")
+
 # Emit a plain event dict; PermissionRequester returns the chosen option_id, or
 # None to deny.
 Emit = Callable[[dict], None]
@@ -114,6 +118,8 @@ class AgentClient(Client):
         **kwargs: Any,
     ) -> ReadTextFileResponse:
         target = self._resolve_in_project(path)
+        log.debug("agent %s reads %s (line=%s limit=%s)",
+                  self.agent_id, target, line, limit)
         text = target.read_text()
         if line is not None or limit is not None:
             lines = text.splitlines(keepends=True)
@@ -126,6 +132,8 @@ class AgentClient(Client):
         self, content: str, path: str, session_id: str, **kwargs: Any
     ) -> Optional[WriteTextFileResponse]:
         target = self._resolve_in_project(path)
+        log.debug("agent %s writes %s (%d bytes)",
+                  self.agent_id, target, len(content))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
         # The filesystem watcher will surface this as a files_changed event.
@@ -135,6 +143,8 @@ class AgentClient(Client):
         """Confine agent file access to the project tree."""
         resolved = Path(path).resolve()
         if self.project_root not in resolved.parents and resolved != self.project_root:
+            log.warning("agent %s denied path outside project root: %s",
+                        self.agent_id, path)
             raise PermissionError(f"path outside project root: {path}")
         return resolved
 

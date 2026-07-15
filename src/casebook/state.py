@@ -19,6 +19,10 @@ from typing import Optional
 
 from dataclasses import dataclass
 
+from . import logsetup
+
+log = logsetup.get_logger("state")
+
 SERVER_INFO_FILENAME = "server.json"
 LOG_FILENAME = "casebook.log"
 
@@ -68,7 +72,8 @@ def read_server_info() -> Optional[ServerInfo]:
     try:
         data = json.loads(path.read_text())
         return ServerInfo(pid=data["pid"], port=data["port"], started=data["started"])
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, OSError) as error:
+        log.debug("ignoring unreadable server info %s: %s", path, error)
         return None
 
 
@@ -140,6 +145,7 @@ def stop_server(wait: bool = False, timeout: float = 5.0) -> Optional[ServerInfo
     if info is None:
         return None
     if is_pid_alive(info.pid):
+        log.info("stopping daemon pid=%s port=%s", info.pid, info.port)
         os.kill(info.pid, signal.SIGTERM)
         if wait:
             wait_for_exit(info.pid, info.port, timeout=timeout)

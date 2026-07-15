@@ -27,6 +27,8 @@ from ..coordinator import CaseCoordinator
 
 STATIC_DIR = Path(__file__).parent.joinpath("static")
 
+log = logsetup.get_logger("server")
+
 
 def create_app(
     *,
@@ -64,6 +66,8 @@ def create_app(
         if project_id in coordinators:
             return coordinators[project_id]
         project_root = projects.resolve_project(project_id)
+        log.info("creating coordinator for project=%s root=%s",
+                 project_id, project_root)
         coordinator = CaseCoordinator(project_root)
         coordinator.load_persisted()
         coordinators[project_id] = coordinator
@@ -197,13 +201,22 @@ def create_app(
 
     async def websocket_endpoint(websocket: WebSocket) -> None:
         pid = websocket.path_params["project_id"]
+        case_id = websocket.query_params.get("case")
+        client = websocket.client
+        peer = f"{client.host}:{client.port}" if client else "?"
+        log.info("ws connect: project=%s case=%s client=%s", pid, case_id, peer)
         try:
             coordinator = get_coordinator(pid)
-        except cases.CasebookError:
+        except cases.CasebookError as error:
+            # A browser holding a URL for a project the daemon no longer knows
+            # about (stale tab, wiped cache): reject cleanly, but say so — this
+            # path is otherwise invisible and looks like a bare disconnect.
+            log.warning("ws rejected: project=%s client=%s reason=%s",
+                        pid, peer, error)
             await websocket.close(code=4000, reason="unknown project")
             return
         await websocket.accept()
-        await _run_socket(websocket, coordinator, websocket.query_params.get("case"))
+        await _run_socket(websocket, coordinator, case_id)
 
     return Starlette(
         lifespan=lifespan,
@@ -241,22 +254,37 @@ async def _run_socket(
 ) -> None:
     """Pump coordinator events out and user actions in until the socket closes."""
     with coordinator.bus.subscribe() as queue:
-        await websocket.send_json(coordinator.snapshot(case_id))
+        snapshot = coordinator.snapshot(case_id)
+        log.info("ws open: case=%s agents=%d", case_id, len(snapshot["agents"]))
+        await websocket.send_json(snapshot)
         sender = asyncio.create_task(_send_events(websocket, queue))
         try:
             while True:
                 action = await websocket.receive_json()
                 _dispatch(coordinator, action)
-        except WebSocketDisconnect:
-            pass
+        except WebSocketDisconnect as disconnect:
+            log.info("ws disconnect: case=%s code=%s", case_id, disconnect.code)
+        except Exception:
+            # An unexpected error here closes the socket and reads as a bare
+            # disconnect in the browser; the traceback is the only way to tell
+            # this apart from a clean client-side close.
+            log.exception("ws error: case=%s", case_id)
         finally:
             sender.cancel()
 
 
 async def _send_events(websocket: WebSocket, queue: asyncio.Queue) -> None:
-    while True:
-        event = await queue.get()
-        await websocket.send_json(event)
+    try:
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # The socket went away between receive and send; the receive side will
+        # observe the disconnect. Note it at debug so a persistent send failure
+        # isn't wholly silent.
+        log.debug("ws send stopped", exc_info=True)
 
 
 def _dispatch(coordinator: CaseCoordinator, action: dict) -> None:
@@ -302,8 +330,10 @@ def _spawn(coro) -> None:
 async def _guard(coro) -> None:
     try:
         await coro
-    except Exception:  # already surfaced as notices where it matters
-        pass
+    except Exception:
+        # Surfaced to the user as notices where it matters; logged at debug so a
+        # background failure still leaves a traceback for `CASEBOOK_LOG_LEVEL=DEBUG`.
+        log.debug("background action failed", exc_info=True)
 
 
 def serve(
@@ -329,7 +359,11 @@ def serve(
         destination = str(log_file) if log_file else "console only"
     level = os.environ.get("CASEBOOK_LOG_LEVEL") or config.log_level()
     logsetup.configure(log_file, level)
-    logsetup.get_logger("server").info(
+    # uvicorn's own logs (startup, and the per-request access log that records the
+    # WebSocket upgrade) are otherwise hidden. Open them up under DEBUG so a user
+    # reporting a connection issue captures the handshake; stay quiet otherwise.
+    uvicorn_level = "info" if str(level).upper() == "DEBUG" else "warning"
+    log.info(
         "casebook serving on http://%s:%s (pid=%s, log=%s, level=%s)",
         host, port, os.getpid(), destination, level,
     )
@@ -339,4 +373,4 @@ def serve(
         bound_port=port,
         project_path=project_path,
     )
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level=uvicorn_level, access_log=True)

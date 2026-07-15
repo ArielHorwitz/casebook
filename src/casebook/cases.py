@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import templates
+from . import logsetup, templates
+
+log = logsetup.get_logger("cases")
 
 CASEBOOK_DIR = "docs/casebook"
 
@@ -95,7 +97,13 @@ def load_case_metadata(case_path: Path) -> dict:
     toml_path = case_path.joinpath("case.toml")
     if not toml_path.exists():
         return {}
-    return tomllib.loads(toml_path.read_text())
+    try:
+        return tomllib.loads(toml_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as error:
+        # A single malformed case.toml shouldn't take down the whole case list;
+        # surface it as an untitled case and log which one is broken.
+        log.warning("could not read case metadata %s: %s", toml_path, error)
+        return {}
 
 
 def load_case(case_path: Path) -> Case:
@@ -150,6 +158,7 @@ def create_case(casebook_path: Path, title: str) -> Case:
     case_id = new_case_id()
     case_path = casebook_path.joinpath(case_id)
     case_path.mkdir(parents=True)
+    log.info("creating case %s at %s", case_id, case_path)
     case_path.joinpath("case.toml").write_text(
         templates.CASE_TOML_TEMPLATE.format(
             title=format_toml_value(title or "Unnamed case"),

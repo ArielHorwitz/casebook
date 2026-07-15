@@ -16,7 +16,10 @@ import shutil
 import tomllib
 from pathlib import Path
 
+from . import logsetup
 from .cases import format_toml_value
+
+log = logsetup.get_logger("storage")
 
 SESSIONS_RELATIVE_PATH = ".casebook/sessions"
 META_FILENAME = "meta.toml"
@@ -92,7 +95,13 @@ class SessionStore:
                 meta_path = session_dir.joinpath(META_FILENAME)
                 if not meta_path.exists():
                     continue
-                metas.append(tomllib.loads(meta_path.read_text()))
+                try:
+                    metas.append(tomllib.loads(meta_path.read_text()))
+                except (tomllib.TOMLDecodeError, OSError) as error:
+                    # Skip a single corrupt session rather than failing startup
+                    # (and hiding every other session with it).
+                    log.warning("skipping unreadable session meta %s: %s",
+                                meta_path, error)
         return metas
 
     def read_transcript(self, case_id: str, agent_id: str) -> list[dict]:
@@ -105,11 +114,17 @@ class SessionStore:
 def _read_transcript(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    return [
-        json.loads(line)
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
+    events = []
+    for number, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            # Drop a single truncated/garbled line (e.g. a crash mid-write)
+            # rather than losing the whole transcript.
+            log.warning("skipping bad transcript line %s:%d: %s", path, number, error)
+    return events
 
 
 def _to_toml(meta: dict) -> str:

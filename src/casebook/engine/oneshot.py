@@ -19,7 +19,10 @@ from acp import PROTOCOL_VERSION, RequestPermissionResponse, spawn_agent_process
 from acp.interfaces import Client, ClientCapabilities, Implementation
 from acp.schema import DeniedOutcome, FileSystemCapabilities
 
+from .. import logsetup
 from ..config import Backend
+
+log = logsetup.get_logger("engine.oneshot")
 
 _NO_FILES = ClientCapabilities(
     fs=FileSystemCapabilities(read_text_file=False, write_text_file=False),
@@ -78,6 +81,7 @@ async def one_shot(
     client = _CollectingClient()
     environment = {**os.environ, **backend.env}
     command, *args = backend.command
+    log.debug("one-shot query via backend %s: %s", backend.name, [command, *args])
     async with AsyncExitStack() as stack:
         conn, _process = await stack.enter_async_context(
             spawn_agent_process(
@@ -103,7 +107,9 @@ async def one_shot(
                     model_id=chosen, session_id=session.session_id
                 )
             except Exception:
-                pass  # backend may not support set_model; proceed with its default
+                # Backend may not support set_model; proceed with its default.
+                log.debug("one-shot set_model(%s) failed, using default",
+                          chosen, exc_info=True)
         await conn.prompt(
             prompt=[text_block(prompt)],
             session_id=session.session_id,

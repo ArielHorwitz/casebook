@@ -14,6 +14,26 @@ stderr; where that ends up depends on the mode:
 
 Call sites fetch a child logger with ``get_logger("coordinator.<project>")`` so
 each line carries its origin.
+
+Conventions (keep the log useful for debugging a user's report without drowning
+it in noise):
+
+  - Get a module logger once at import: ``log = get_logger("<component>")``
+    (e.g. ``"server"``, ``"config"``, ``"engine.session"``). The coordinator is
+    per-project: ``get_logger(f"coordinator.{project}")``.
+  - **INFO** — the lifecycle/audit trail worth seeing by default: process and
+    coordinator start/stop, a connection opening/closing, a session or case
+    created/removed, a user action's outcome. One line per meaningful event.
+  - **DEBUG** — the detail you only want when reproducing a bug: the exact
+    command spawned, a filesystem write, per-request tracing, streamed chunks,
+    and the full traceback of an error that was *also* surfaced to the user.
+  - **WARNING** — a handled problem the user can't see but a maintainer should:
+    a corrupt cache/config file, a rejected connection, a skipped bad record.
+  - **ERROR / .exception()** — an unexpected failure with no other surfacing.
+  - The golden rule: **never swallow an exception silently.** Every ``except``
+    that recovers must leave a line — WARNING/ERROR if it's the only trace, or
+    ``log.debug(..., exc_info=True)`` when a user-facing notice already carries
+    the summary and the traceback is just for ``CASEBOOK_LOG_LEVEL=DEBUG``.
 """
 
 from __future__ import annotations

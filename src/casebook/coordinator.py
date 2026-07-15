@@ -401,6 +401,7 @@ class CaseCoordinator:
             self._persisted.discard(agent_id)
             self.store.delete(cid, agent_id)
             self._emit({"type": "agent_removed", "agent_id": agent_id, "case_id": cid})
+            self.log.debug("start failed for agent=%s", agent_id, exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id, "case_id": cid,
                         "level": "error", "message": f"failed to start agent: {error}"})
             raise
@@ -425,6 +426,8 @@ class CaseCoordinator:
         try:
             backend = self.config.select_backend(agent["backend"] or None)
         except KeyError as error:
+            self.log.debug("resume backend lookup failed for agent=%s", agent_id,
+                           exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "level": "error", "message": f"cannot resume session: {error}"})
@@ -451,6 +454,7 @@ class CaseCoordinator:
             agent["state"] = "stored"
             agent["live"] = False
             self._emit({"type": "agent_updated", **agent})
+            self.log.debug("resume failed for agent=%s", agent_id, exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "level": "error", "message": f"failed to resume session: {error}"})
@@ -618,6 +622,8 @@ class CaseCoordinator:
             try:
                 await session.set_model(desired)
             except Exception as error:
+                self.log.debug("default model selection failed for agent=%s",
+                               agent_id, exc_info=True)
                 self._emit({"type": "notice", "agent_id": agent_id,
                             "case_id": self._agents[agent_id]["case_id"],
                             "level": "error", "message": f"could not select default model: {error}"})
@@ -636,6 +642,7 @@ class CaseCoordinator:
         try:
             await session.set_model(model_id)
         except Exception as error:
+            self.log.debug("set_model failed for agent=%s", agent_id, exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "level": "error", "message": f"could not set model: {error}"})
@@ -681,6 +688,8 @@ class CaseCoordinator:
         try:
             backend = self.config.select_backend(naming_backend)
         except KeyError as error:
+            self.log.debug("naming backend lookup failed for agent=%s", agent_id,
+                           exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "level": "error", "message": f"cannot name session: {error}"})
@@ -693,6 +702,7 @@ class CaseCoordinator:
                 backend, self.project_root, prompt, model=self.config.naming_model
             )
         except Exception as error:
+            self.log.debug("naming query failed for agent=%s", agent_id, exc_info=True)
             self._emit({"type": "notice", "agent_id": agent_id,
                         "case_id": agent["case_id"],
                         "level": "error", "message": f"naming failed: {error}"})
@@ -827,6 +837,7 @@ class CaseCoordinator:
                 self._emit({"type": "files_changed", "case_id": case_id,
                             "files": case.files()})
         except Exception as error:
+            self.log.debug("file watcher stopped for case=%s", case_id, exc_info=True)
             self._emit({"type": "notice", "case_id": case_id,
                         "level": "error", "message": f"file watcher stopped: {error}"})
 
@@ -857,6 +868,8 @@ class CaseCoordinator:
         }
 
     async def shutdown(self) -> None:
+        self.log.info("coordinator shutdown: watchers=%d sessions=%d",
+                      len(self._watchers), len(self.sessions.all()))
         for _task, stop in self._watchers.values():
             stop.set()
         for session in self.sessions.all():

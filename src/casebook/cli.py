@@ -21,11 +21,20 @@ from pathlib import Path
 
 from . import state
 
+# The host shown in the browser's address bar. `casebook.localhost` is nicer to
+# read and recognise than a bare loopback IP; browsers resolve any `*.localhost`
+# name to the loopback interface per RFC 6761, so it reaches the same IPv4-bound
+# server with no DNS or hosts-file setup. Set CASEBOOK_BROWSER_HOST=127.0.0.1 to
+# fall back to the raw IP (e.g. on a browser or resolver that doesn't honour
+# `.localhost`). Only affects the opened URL — the server still binds --host.
+DEFAULT_BROWSER_HOST = "casebook.localhost"
+
 
 def _open_browser(port: int, project_path: str | None = None) -> None:
     """Open the browser to the casebook UI, optionally at a project page."""
     from urllib.parse import quote
-    base_url = f"http://127.0.0.1:{port}"
+    host = os.environ.get("CASEBOOK_BROWSER_HOST") or DEFAULT_BROWSER_HOST
+    base_url = f"http://{host}:{port}"
     if project_path is not None:
         resolved = str(Path(project_path).resolve())
         url = f"{base_url}/?path={quote(resolved, safe='/')}"

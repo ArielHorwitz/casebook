@@ -288,7 +288,9 @@ class CaseCoordinator:
         return dict(self.config.hotkeys)
 
     def ui_config(self) -> dict:
-        return dict(self.config.ui)
+        # project_name is runtime, not on-disk config — injected here so the
+        # frontend (which already fetches /ui on every scoped page) can title tabs.
+        return {**dict(self.config.ui), "project_name": self.project_root.name}
 
     def reload_config(self) -> None:
         """Re-read config from disk and notify connected frontends."""

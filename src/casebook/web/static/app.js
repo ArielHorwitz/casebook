@@ -51,8 +51,22 @@ const state = {
   widths: [],
   widthIndex: -1,
   caseColors: {},
+  projectName: null,  // for tab titles; set from /ui
+  caseTitle: null,    // resolved title of the case page, for the tab title
   prevUsage: new Map(),  // agent_id → {input_tokens, output_tokens, total_tokens} for computing deltas
 };
+
+// Tab title: "{project} · {label} — casebook" (label omitted on the home page).
+// Any part not yet loaded is skipped, so the title fills in as data arrives.
+function updateTitle() {
+  let label;
+  if (route.mode === "scratch") label = "scratch";
+  else if (route.mode === "case") label = state.caseTitle || route.caseId;
+  else if (route.mode === "home") label = null;
+  else return void (document.title = "Casebook");  // project browser
+  const parts = [state.projectName, label].filter(Boolean);
+  document.title = parts.length ? `${parts.join(" · ")} — casebook` : "casebook";
+}
 
 const el = (id) => document.getElementById(id);
 
@@ -1054,6 +1068,8 @@ async function loadUi() {
   const width = saved || ui.session_width;
   if (width) style.setProperty("--session-width", width);
   state.widthIndex = state.widths.indexOf(width);
+  state.projectName = ui.project_name || null;
+  updateTitle();
 }
 
 function cycleWidth() {
@@ -1181,7 +1197,8 @@ async function renderCaseDetail(caseId) {
 async function openCaseView(caseId) {
   const detail = await fetch(`${apiBase()}/cases/${caseId}`).then((response) => response.json()).catch(() => null);
   el("case-title").textContent = (detail && detail.title) || caseId;
-  document.title = `${(detail && detail.title) || caseId} — casebook`;
+  state.caseTitle = (detail && detail.title) || caseId;
+  updateTitle();
   renderFiles((detail && detail.files) || []);
 }
 
@@ -1317,7 +1334,7 @@ if (route.mode === "projects") {
   connect();
   loadBackends();
   el("case-title").textContent = "Scratch sessions";
-  document.title = "Scratch — casebook";
+  updateTitle();
 } else {
   loadHotkeys();
   loadUi();

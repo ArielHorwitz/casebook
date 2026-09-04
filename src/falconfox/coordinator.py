@@ -297,6 +297,11 @@ class SessionCoordinator:
         # A throwaway is hidden by default; infrastructure asks for hidden
         # without asking to be thrown away.
         hidden = bool(ephemeral) if hidden is None else bool(hidden)
+        # Every session gets told what it is running inside, on its first
+        # message rather than at spawn: there is no channel to an agent that
+        # has not been prompted, so the first prompt is the earliest moment
+        # this can be said at all.
+        self._pending_context[session_id] = config.SESSION_CONTEXT
         has_slot = await self._ensure_slot(infrastructure=hidden)
         now = _now_iso()
         if not has_slot:
@@ -519,6 +524,10 @@ class SessionCoordinator:
         self._emit({"type": "transcript_reset", "session_id": session_id,
                     "transcript": transcript})
         if not loaded and transcript:
+            # Replaces any unsent session context, which is not a loss: the
+            # transcript being re-sent contains it already if it was ever
+            # delivered, and a session with a transcript has had its first
+            # message.
             self._pending_context[session_id] = self._context_prompt(session_id)
             self._emit({"type": "notice", "session_id": session_id,
                         "message": "Context re-sent from saved transcript imperfectly — "

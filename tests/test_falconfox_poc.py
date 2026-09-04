@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from falconfox.cli import CliError, _guard_self_target, build_parser, cmd_daemon
+from falconfox import config
 from falconfox.coordinator import SessionCoordinator
 from falconfox.errors import FalconFoxError
 from falconfox.engine.session import AgentSession
@@ -1742,6 +1743,66 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             await bot._reconcile_persisted_turns()
             self.assertEqual(bot._turn_dest, {})
             self.assertEqual(bot.telegram.messages, [])
+
+
+class SessionContextTests(unittest.IsolatedAsyncioTestCase):
+    """What a session is told about itself, and when."""
+
+    class FakeSession:
+        def __init__(self, session_id="abcd1234"):
+            self.session_id = session_id
+            self.sent = []
+
+        async def send(self, text, display_text=None):
+            self.sent.append((text, display_text))
+
+    def _coordinator(self, directory, session):
+        coordinator = SessionCoordinator(Path(directory))
+        coordinator._metadata[session.session_id] = {"session_id": session.session_id}
+        coordinator.sessions.add(session)
+        return coordinator
+
+    async def test_the_first_message_carries_the_context_and_the_next_does_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.FakeSession()
+            coordinator = self._coordinator(directory, session)
+            coordinator._pending_context[session.session_id] = config.SESSION_CONTEXT
+
+            await coordinator.send(session.session_id, "hello")
+            await coordinator.send(session.session_id, "again")
+
+            first, second = session.sent
+            self.assertIn("FalconFox session context", first[0])
+            self.assertIn("the user's message follows", first[0])
+            self.assertTrue(first[0].endswith("hello"))
+            # The transcript shows only what the user typed, both times.
+            self.assertEqual(first[1], "hello")
+            self.assertNotIn("FalconFox session context", second[0])
+
+    async def test_every_new_session_is_given_it(self):
+        # Including the manager and the private chat, which are sessions like
+        # any other and just as unable to discover this for themselves.
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(coordinator, "_ensure_slot", return_value=False):
+                session_id = await coordinator.add_session(path=directory, hidden=True)
+            self.assertEqual(coordinator._pending_context[session_id],
+                             config.SESSION_CONTEXT)
+
+    async def test_a_resume_that_re_sends_a_transcript_wins(self):
+        # Both want the same slot. The transcript is the one that matters: it
+        # already contains the context if it was ever delivered.
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.FakeSession()
+            coordinator = self._coordinator(directory, session)
+            coordinator._pending_context[session.session_id] = config.SESSION_CONTEXT
+            coordinator._transcripts[session.session_id] = [
+                {"type": "message", "role": "user", "text": "earlier"}]
+            coordinator._pending_context[session.session_id] = \
+                coordinator._context_prompt(session.session_id)
+
+            await coordinator.send(session.session_id, "hello")
+            self.assertIn("resuming a previous session", session.sent[0][0])
 
 
 class AttachmentTests(unittest.IsolatedAsyncioTestCase):

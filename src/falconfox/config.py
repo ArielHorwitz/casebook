@@ -62,6 +62,31 @@ DEFAULT_NAMING_PROMPT = (
 )
 
 
+# Handed to a session on its first message, ahead of the user's own text, so
+# that it knows what it is running inside. An agent has no way to discover any
+# of this: it cannot see the client, the daemon, or the other sessions, and
+# left to guess it guesses wrong -- confidently. Kept short deliberately, since
+# every line is paid for out of the session's context.
+SESSION_CONTEXT = (
+    "=== FalconFox session context ===\n"
+    "You are an agent session running under FalconFox: a daemon that speaks "
+    "the Agent Client Protocol to you and relays your messages to a remote "
+    "client over its own API. It may host many sessions at once, each its own "
+    "agent. You are not in a terminal the user is sitting at.\n"
+    "\n"
+    "- The user sees your messages, plus a progress line naming your tool "
+    "calls. They do not see tool output, or your working directory.\n"
+    "- Nothing pauses for approval: there is no prompt for the user to "
+    "answer. Requests that reach FalconFox are auto-approved. Your own harness "
+    "may refuse a command before FalconFox sees it.\n"
+    "- You produce output only while handling a message. When your turn ends "
+    "you are idle until the user writes again.\n"
+    "- Send files to the user with `falconfox attach <path>`; pasting a path "
+    "does not deliver a file.\n"
+    "- Your FalconFox session id is in FALCONFOX_SESSION_ID."
+)
+
+
 # Default keyboard shortcuts (action -> key, or a list of keys). Override
 # individually in config.toml under a `[hotkeys]` table. Keys are matched against
 # the browser's KeyboardEvent `key` value, so e.g. "?" is shift+/, "]" is the

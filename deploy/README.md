@@ -167,6 +167,27 @@ way the agent path is not: an agent's commands are subject to its backend's
 own sandbox and permission rules, and `/sh` has none of that. It is owner-only
 for the same reason every other command is, and every invocation is logged.
 
+## What a session is told about itself
+
+An agent cannot discover that it is running under FalconFox. It cannot see the
+client, the daemon, or the other sessions, and left to guess it guesses wrong
+with confidence. So every session is handed a short block of context ahead of
+the first message it receives (`config.SESSION_CONTEXT`), covering what the
+user can and cannot see, that nothing will pause for approval, that it cannot
+speak until spoken to, and how to send a file.
+
+It rides the same hidden-context channel that re-sends a transcript to a
+backend without native resume: the agent receives it, and the chat shows only
+what the user typed. It is sent once, on the first message, because that is
+the earliest moment anything can be said to an agent at all, and because every
+line is paid for out of the session's context.
+
+The known gap is that a message can be compacted away, while a system prompt
+could not. ACP has no field for system instructions (`NewSessionRequest`
+carries `cwd`, `additionalDirectories`, `mcpServers` and `_meta`, and nothing
+else), and no compaction signal either, so re-injection has to be inferred
+from a drop in a turn's input tokens. Not built yet.
+
 ## Sending files out of a session
 
 A session hands a file to whoever is reading it with `falconfox attach

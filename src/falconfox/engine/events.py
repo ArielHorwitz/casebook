@@ -16,6 +16,12 @@ class EventBus:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue] = set()
 
+    @property
+    def subscribers(self) -> int:
+        """How many clients are listening. Zero means an event goes nowhere,
+        which is worth knowing before waiting on one to answer."""
+        return len(self._subscribers)
+
     def publish(self, event: dict) -> None:
         for queue in self._subscribers:
             queue.put_nowait(event)

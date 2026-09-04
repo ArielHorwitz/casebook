@@ -115,6 +115,12 @@ def create_app(
                 await coordinator.cancel(session_id)
             elif action == "open":
                 coordinator.open_session(session_id)
+            elif action == "attach":
+                # Answers with the attachment's own result rather than the
+                # session, since "did it arrive" is the whole question.
+                return JSONResponse(await coordinator.attach(
+                    session_id, body.get("path", ""), body.get("caption"),
+                    ack=bool(body.get("ack", True))))
             else:
                 return JSONResponse({"error": f"unknown action: {action}"}, status_code=404)
             return JSONResponse(coordinator.get_session(session_id))
@@ -213,6 +219,9 @@ def _dispatch(coordinator: SessionCoordinator, action: dict) -> None:
         _spawn(coordinator.stop_session(session_id))
     elif name == "delete":
         _spawn(coordinator.delete_session(session_id))
+    elif name == "attachment_result":
+        coordinator.resolve_attachment(action.get("request_id"),
+                                       bool(action.get("ok")), action.get("error"))
     elif name == "revert":
         _spawn(coordinator.revert_session(session_id, action["event_index"]))
     elif name == "fork":

@@ -1020,6 +1020,60 @@ class FalconFoxTelegramBot:
             return True
         return False
 
+    # --- attachments -------------------------------------------------------
+
+    async def _deliver_attachment(self, event: dict) -> None:
+        """Send a file a session asked to hand to the user, then say so.
+
+        The reply matters as much as the upload: `falconfox attach` waits on
+        it, so a silent failure here becomes an agent that believes it sent
+        something it did not.
+        """
+        session_id = event.get("session_id")
+        source = Path(event.get("path") or "")
+        dest = self._attachment_dest(session_id)
+        error = None
+        if dest is None:
+            error = "this session has no chat to send to"
+        else:
+            try:
+                await self.telegram.send_document(
+                    dest.chat, source, caption=event.get("caption"),
+                    thread=dest.thread)
+                log.info("attachment sent: session=%s file=%s", session_id, source)
+            except (ApiError, OSError) as failure:
+                error = str(failure)
+                log.warning("attachment failed: session=%s file=%s (%s)",
+                            session_id, source, failure)
+        if error is not None and dest is not None:
+            await self._say(dest, f"Could not send {source.name}: {error}")
+        await self._report_attachment(event.get("request_id"), error)
+
+    def _attachment_dest(self, session_id: str) -> Optional[Dest]:
+        """Where a session's files go: its topic, or the chat it lives in."""
+        if session_id == self.concierge_session_id:
+            return Dest(self.config.owner_id, None)
+        if self.forum_chat_id is None:
+            return None
+        if session_id == self.manager_session_id:
+            return Dest(self.forum_chat_id, None)
+        thread = self._topics.get(session_id)
+        return Dest(self.forum_chat_id, thread) if thread is not None else None
+
+    async def _report_attachment(self, request_id: Optional[str],
+                                 error: Optional[str]) -> None:
+        if request_id is None or self._ws is None:
+            return
+        try:
+            await self._ws.send(json.dumps({
+                "action": "attachment_result", "request_id": request_id,
+                "ok": error is None, "error": error,
+            }))
+        except (ConnectionClosed, OSError):
+            # Nothing to do: the daemon's wait will time out and say so, which
+            # is the same answer arriving more slowly.
+            log.warning("could not report attachment %s", request_id)
+
     # --- shell ------------------------------------------------------------
 
     async def _shell_command(self, dest: Dest, command: str, text: str,
@@ -1443,6 +1497,9 @@ class FalconFoxTelegramBot:
                                           or event.get("tool_kind") or "tool")
             await self._set_activity(
                 session_id, "working" if status in ("completed", "failed") else "tool")
+            return
+        if event_type == "attachment":
+            await self._deliver_attachment(event)
             return
         if event_type == "session_added":
             await self._ensure_topic(event)

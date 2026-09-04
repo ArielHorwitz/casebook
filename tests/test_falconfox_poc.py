@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from falconfox.cli import CliError, _guard_self_target, build_parser, cmd_daemon
 from falconfox.coordinator import SessionCoordinator
+from falconfox.errors import FalconFoxError
 from falconfox.engine.session import AgentSession
 from falconfox.storage import SessionStore
 from falconfox.watchdog import StallWatchdog
@@ -375,6 +376,8 @@ class FakeTelegram:
         self.edits = []
         self.actions = []
         self.action_error = None
+        self.documents = []
+        self.document_error = None
         self._next_id = 100
 
     async def message(self, chat_id, text, reply_to=None, silent=False, thread=None):
@@ -383,6 +386,11 @@ class FakeTelegram:
         self.message_silent.append(silent)
         self._next_id += 1
         return self._next_id
+
+    async def send_document(self, chat_id, file_path, caption=None, thread=None):
+        if self.document_error is not None:
+            raise self.document_error
+        self.documents.append((chat_id, thread, file_path, caption))
 
     async def html_message(self, chat_id, html_text, plain_fallback, reply_to=None,
                            thread=None):
@@ -1734,6 +1742,153 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             await bot._reconcile_persisted_turns()
             self.assertEqual(bot._turn_dest, {})
             self.assertEqual(bot.telegram.messages, [])
+
+
+class AttachmentTests(unittest.IsolatedAsyncioTestCase):
+    """`attach` is a request to a client, so the answer comes back from one."""
+
+    def _coordinator(self, directory):
+        return SessionCoordinator(Path(directory))
+
+    async def test_no_client_fails_immediately(self):
+        # Waiting cannot change the outcome when nothing is subscribed, only
+        # how long the agent waits to hear it.
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            target = Path(directory).joinpath("file.txt")
+            target.write_text("x")
+            with self.assertRaises(FalconFoxError) as caught:
+                await coordinator.attach("abcd1234", str(target))
+            self.assertIn("no client", str(caught.exception))
+
+    async def test_a_client_result_completes_the_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            target = Path(directory).joinpath("file.txt")
+            target.write_text("x")
+            with coordinator.bus.subscribe() as queue:
+                call = asyncio.ensure_future(coordinator.attach("abcd1234", str(target)))
+                event = await asyncio.wait_for(queue.get(), 2)
+                self.assertEqual(event["type"], "attachment")
+                coordinator.resolve_attachment(event["request_id"], True)
+                self.assertEqual((await asyncio.wait_for(call, 2))["delivered"], True)
+
+    async def test_a_client_failure_is_raised_to_the_caller(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            target = Path(directory).joinpath("file.txt")
+            target.write_text("x")
+            with coordinator.bus.subscribe() as queue:
+                call = asyncio.ensure_future(coordinator.attach("abcd1234", str(target)))
+                event = await asyncio.wait_for(queue.get(), 2)
+                coordinator.resolve_attachment(event["request_id"], False, "file is too big")
+                with self.assertRaises(FalconFoxError) as caught:
+                    await asyncio.wait_for(call, 2)
+            self.assertIn("too big", str(caught.exception))
+
+    async def test_waiting_gives_up_rather_than_hanging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            target = Path(directory).joinpath("file.txt")
+            target.write_text("x")
+            with coordinator.bus.subscribe():
+                with self.assertRaises(FalconFoxError) as caught:
+                    await coordinator.attach("abcd1234", str(target), timeout=0.05)
+            self.assertIn("confirmed", str(caught.exception))
+
+    async def test_no_ack_returns_without_waiting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            target = Path(directory).joinpath("file.txt")
+            target.write_text("x")
+            with coordinator.bus.subscribe():
+                result = await coordinator.attach("abcd1234", str(target), ack=False)
+            self.assertIsNone(result["delivered"])
+
+    async def test_a_missing_file_never_reaches_a_client(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = self._coordinator(directory)
+            coordinator._metadata["abcd1234"] = {"session_id": "abcd1234"}
+            with coordinator.bus.subscribe() as queue:
+                with self.assertRaises(FalconFoxError):
+                    await coordinator.attach("abcd1234", f"{directory}/nope.txt")
+                self.assertTrue(queue.empty())
+
+
+class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    """Where the bot sends a session's file, and what it reports back."""
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._ws = self.FakeSocket()
+        return bot
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(json.loads(payload))
+
+    async def test_a_file_goes_to_its_session_topic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("abcd1234", 42)
+            target = Path(directory).joinpath("report.txt")
+            target.write_text("x")
+            await bot._deliver_attachment({
+                "session_id": "abcd1234", "path": str(target),
+                "caption": "here", "request_id": "req1"})
+            self.assertEqual(bot.telegram.documents,
+                             [(-1001, 42, target, "here")])
+            self.assertEqual(bot._ws.sent, [{"action": "attachment_result",
+                                             "request_id": "req1", "ok": True,
+                                             "error": None}])
+
+    async def test_the_manager_sends_to_general(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.manager_session_id = "manager1"
+            target = Path(directory).joinpath("report.txt")
+            target.write_text("x")
+            await bot._deliver_attachment({
+                "session_id": "manager1", "path": str(target), "request_id": "req2"})
+            self.assertEqual(bot.telegram.documents[0][1], None)
+
+    async def test_a_session_with_no_topic_reports_the_failure(self):
+        # The agent is waiting on this answer, so "nowhere to send it" has to
+        # come back rather than being logged and dropped.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            target = Path(directory).joinpath("report.txt")
+            target.write_text("x")
+            await bot._deliver_attachment({
+                "session_id": "orphan", "path": str(target), "request_id": "req3"})
+            self.assertEqual(bot.telegram.documents, [])
+            self.assertFalse(bot._ws.sent[0]["ok"])
+            self.assertIn("no chat", bot._ws.sent[0]["error"])
+
+    async def test_an_upload_failure_is_reported_and_said(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("abcd1234", 42)
+            target = Path(directory).joinpath("report.txt")
+            target.write_text("x")
+            bot.telegram.document_error = ApiError("file is too big")
+            await bot._deliver_attachment({
+                "session_id": "abcd1234", "path": str(target), "request_id": "req4"})
+            self.assertFalse(bot._ws.sent[0]["ok"])
+            self.assertIn("too big", bot._ws.sent[0]["error"])
+            self.assertIn("Could not send report.txt", bot.telegram.messages[0][1])
 
 
 class ShellRunnerTests(unittest.IsolatedAsyncioTestCase):

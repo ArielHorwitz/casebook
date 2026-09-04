@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,9 @@ from .engine.session import AgentSession, SessionManager
 from .errors import FalconFoxError
 
 _REPLAYABLE = {"message", "tool_call", "notice", "plan", "usage"}
+# How long `attach` waits for the client to report back. Generous: the
+# client is uploading a file of unknown size over a network.
+ATTACHMENT_TIMEOUT = 120.0
 _LOG_INFO_EVENTS = {
     "session_added", "session_removed", "config_changed", "permission_request",
     "permission_resolved", "transcript_reset",
@@ -54,6 +58,10 @@ class SessionCoordinator:
         self._config_options: dict[str, list[dict]] = {}
         self._commands: dict[str, list[dict]] = {}
         self._pending_context: dict[str, str] = {}
+        # In-flight `attach` calls, keyed by request id. The daemon cannot send
+        # a file itself -- only the client attached to the chat can -- so the
+        # HTTP call waits here until that client reports back.
+        self._attachments: dict[str, asyncio.Future] = {}
         self._auto_named: dict[str, bool] = {}
         self._persisted: set[str] = set()
         self._usage: dict[str, dict] = {}
@@ -546,6 +554,53 @@ class SessionCoordinator:
                                display_text=text)
         else:
             await session.send(text)
+
+    async def attach(self, session_id: str, path: str,
+                     caption: Optional[str] = None, ack: bool = True,
+                     timeout: float = ATTACHMENT_TIMEOUT) -> dict:
+        """Hand a file to whichever client is showing this session.
+
+        The daemon has no chat of its own, so this is a request to the client
+        and the answer has to come back from it. Waiting for that answer is the
+        default because the alternative is an agent that cannot tell the
+        difference between a delivered file and one that was silently dropped.
+        """
+        self._require(session_id)
+        source = Path(path).expanduser()
+        if not source.is_file():
+            raise FalconFoxError(f"not a file: {source}")
+        if not self.bus.subscribers:
+            # Fail now rather than after the timeout: nothing is listening, so
+            # waiting cannot change the outcome, only how long it takes.
+            raise FalconFoxError("no client is connected to send the file to")
+        request_id = uuid.uuid4().hex[:8]
+        waiter: Optional[asyncio.Future] = None
+        if ack:
+            waiter = asyncio.get_running_loop().create_future()
+            self._attachments[request_id] = waiter
+        self._emit({"type": "attachment", "session_id": session_id,
+                    "path": str(source.resolve()), "caption": caption,
+                    "request_id": request_id})
+        if waiter is None:
+            return {"request_id": request_id, "delivered": None}
+        try:
+            result = await asyncio.wait_for(waiter, timeout)
+        except asyncio.TimeoutError:
+            raise FalconFoxError(
+                f"no client confirmed the file within {timeout:.0f}s") from None
+        finally:
+            self._attachments.pop(request_id, None)
+        if not result.get("ok"):
+            raise FalconFoxError(result.get("error") or "the client could not send the file")
+        return {"request_id": request_id, "delivered": True}
+
+    def resolve_attachment(self, request_id: str, ok: bool,
+                           error: Optional[str] = None) -> None:
+        """A client reporting what became of an attachment it was handed."""
+        waiter = self._attachments.get(request_id)
+        if waiter is None or waiter.done():
+            return  # already timed out, or never waited for
+        waiter.set_result({"ok": ok, "error": error})
 
     async def cancel(self, session_id: str) -> None:
         self._require(session_id)

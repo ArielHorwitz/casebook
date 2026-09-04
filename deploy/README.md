@@ -167,6 +167,24 @@ way the agent path is not: an agent's commands are subject to its backend's
 own sandbox and permission rules, and `/sh` has none of that. It is owner-only
 for the same reason every other command is, and every invocation is logged.
 
+## Sending files out of a session
+
+A session hands a file to whoever is reading it with `falconfox attach
+<path>`, which the agent runs like any other command. It needs no argument
+naming the chat: the daemon puts `FALCONFOX_SESSION_ID` in every session's
+environment, so the command knows which session it belongs to, and the bot
+knows which topic that session owns.
+
+The daemon cannot send anything itself, so `attach` is a request to whichever
+client is showing the session, and the answer comes back from that client. The
+call waits for it by default, because an agent that cannot distinguish a
+delivered file from a dropped one will confidently tell you it sent something
+it did not. `--no-ack` returns as soon as the request is handed over.
+
+Failures are answered rather than logged: no client connected, no topic to
+send to, over Telegram's 50MB limit, or whatever Telegram itself said. The
+size check happens in the CLI so the agent hears it from the command it ran.
+
 ## Updating (the dogfooding loop)
 
 Development happens in `.worktrees/` under the development checkout (or

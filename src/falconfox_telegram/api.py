@@ -8,6 +8,8 @@ import json
 import logging
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 
 log = logging.getLogger("falconfox.telegram.api")
 
@@ -25,6 +27,30 @@ _REQUESTS = concurrent.futures.ThreadPoolExecutor(
 
 class ApiError(Exception):
     pass
+
+
+def _multipart(fields: dict, file_field: str, file_path: Path) -> tuple[bytes, str]:
+    """Build a multipart/form-data body: the one Telegram call that is not JSON.
+
+    Hand-rolled rather than pulled in as a dependency -- sending a file is a
+    header, two delimiters and the bytes, and the alternative is a package for
+    it.
+    """
+    boundary = f"----falconfox{uuid.uuid4().hex}"
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        if value is None:
+            continue
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+            f"{value}\r\n".encode())
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+        f"filename=\"{file_path.name}\"\r\n"
+        f"Content-Type: application/octet-stream\r\n\r\n".encode())
+    parts.append(file_path.read_bytes())
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 async def _json_request(url: str, method: str = "GET", body: dict | None = None):
@@ -142,6 +168,39 @@ class TelegramApi:
             body["disable_notification"] = True
         result = await self.call("sendMessage", body)
         return (result or {}).get("message_id")
+
+    async def send_document(self, chat_id: int, file_path: Path,
+                            caption: str | None = None,
+                            thread: int | None = None) -> None:
+        """Upload a file to a chat. Raises ApiError with Telegram's own reason."""
+        fields = {"chat_id": str(chat_id)}
+        if caption:
+            fields["caption"] = caption
+        if thread is not None:
+            fields["message_thread_id"] = str(thread)
+        body, content_type = _multipart(fields, "document", file_path)
+
+        def perform():
+            request = urllib.request.Request(
+                f"{self.base_url}/sendDocument", data=body, method="POST",
+                headers={"Content-Type": content_type})
+            try:
+                # Longer than the JSON timeout: this is an upload, and the
+                # limit is 50MB of it.
+                with urllib.request.urlopen(request, timeout=110) as response:
+                    payload = json.loads(response.read() or b"{}")
+            except urllib.error.HTTPError as error:
+                try:
+                    detail = json.loads(error.read()).get("description") or str(error)
+                except Exception:
+                    detail = str(error)
+                raise ApiError(detail) from error
+            except (urllib.error.URLError, OSError) as error:
+                raise ApiError(f"{type(error).__name__}: {error}") from error
+            if not payload.get("ok"):
+                raise ApiError(payload.get("description", "sendDocument failed"))
+
+        await asyncio.get_running_loop().run_in_executor(_REQUESTS, perform)
 
     async def html_message(self, chat_id: int, html_text: str, plain_fallback: str,
                            reply_to: int | None = None,

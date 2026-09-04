@@ -182,14 +182,13 @@ Two shapes, and they are not exclusive:
   similar) rather than an exposed port. Read-only first (list, view, inline
   images, download), scoped to session workspaces, with the bot posting a deep
   link into each topic so a session and its files are one tap apart.
-* **Sending files through Telegram.** A `/get <path>` command, or an agent able
-  to attach a file rather than paste it. Much smaller, needs no infrastructure
-  at all, and works when the VPN does not. Telegram renders images and previews
-  documents in-chat, so this covers more than it sounds like.
+* **Sending files through Telegram.** Half done: `falconfox attach <path>` lets
+  a session send a file, which covers the agent-to-user direction. What is
+  still missing is the user asking for one directly, a `/get <path>` command,
+  and the reverse direction of sending a file *to* a session.
 
 Deferred because the browser half is a networking and auth decision before it
-is a feature, and the Telegram half is worth doing on its own whichever way
-that decision goes.
+is a feature.
 
 ## Tell a session when its turn was interrupted
 

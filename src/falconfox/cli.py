@@ -79,6 +79,32 @@ def _start_daemon(host: str, port: Optional[int] = None) -> state.ServerInfo:
     return info
 
 
+# Telegram's bot API refuses a document over 50MB, and it is the only client
+# that can send one today. Checked here so the agent is told by the command it
+# ran, rather than by a failure that surfaces two processes away.
+MAX_ATTACHMENT_BYTES = 50 * 1000 * 1000
+
+
+def cmd_attach(args) -> None:
+    session_id = os.environ.get("FALCONFOX_SESSION_ID")
+    if not session_id:
+        raise CliError("not running inside a FalconFox session, so there is no "
+                       "chat to send a file to")
+    for name in args.paths:
+        source = Path(name).expanduser()
+        if not source.is_file():
+            raise CliError(f"not a file: {source}")
+        size = source.stat().st_size
+        if size > MAX_ATTACHMENT_BYTES:
+            raise CliError(f"{source.name} is {size / 1_000_000:.0f}MB, over the "
+                           f"{MAX_ATTACHMENT_BYTES // 1_000_000}MB limit")
+        _request("POST", f"/api/sessions/{session_id}/attach",
+                 {"path": str(source.resolve()), "caption": args.caption,
+                  "ack": not args.no_ack})
+        print(f"sent {source.name}" if not args.no_ack
+              else f"handed {source.name} to the client")
+
+
 def _guard_self_target(session_id: str, action: str) -> None:
     current = os.environ.get("FALCONFOX_SESSION_ID")
     if current and current == session_id and action in ("stop", "delete"):
@@ -197,6 +223,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="falconfox",
                                      description="Remote ACP session daemon and control plane.")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    attach = sub.add_parser("attach", help="send a file to this session's chat")
+    attach.add_argument("paths", nargs="+", help="files to send")
+    attach.add_argument("--caption", default=None, help="text shown with the file")
+    attach.add_argument("--no-ack", action="store_true",
+                        help="do not wait for the client to confirm delivery")
+    attach.set_defaults(func=cmd_attach)
 
     daemon = sub.add_parser("daemon", help="start or manage the daemon")
     daemon.add_argument("--host", default="127.0.0.1")

@@ -15,6 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/falconfox"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 BIN_DIR="$HOME/.local/bin"
+DEV_BIN_DIR="$HOME/.local/state/falconfox-dev/bin"
 UNITS=(falconfox-daemon.service falconfox-telegram.service)
 DEV_UNITS=(falconfox-dev-daemon.service falconfox-dev-telegram.service)
 
@@ -38,6 +39,21 @@ install_units() {
 # by hand -- which is exactly what happened the first time.
 install_dev_units() {
     render_units "${DEV_UNITS[@]}"
+    install_dev_shims
+}
+
+# Agent sessions inherit the daemon's PATH, so whichever `falconfox` is on it
+# is the one an agent runs. ~/.local/bin belongs to the deployment, so without
+# a shim of its own a dev session drives the dev daemon with the *deployment's*
+# CLI -- and no CLI change is testable from the instance that exists to test
+# them. Observed exactly once: an agent reported `falconfox attach` missing
+# from a build that had it.
+install_dev_shims() {
+    mkdir -p "$DEV_BIN_DIR"
+    local name
+    for name in falconfox falconfox-telegram; do
+        ln -sfn "$REPO/.venv/bin/$name" "$DEV_BIN_DIR/$name"
+    done
 }
 
 # Put the CLI on PATH. ~/.local/bin is already picked up by the stock Ubuntu

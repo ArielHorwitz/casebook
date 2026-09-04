@@ -104,9 +104,12 @@ agents are editing.
 The two instances are separated by more than the branch: the dev units set
 `XDG_STATE_HOME`/`XDG_CONFIG_HOME` to `~/.local/state/falconfox-dev` and
 `~/.config/falconfox-dev`, so dev has its own config, its own state, its own
-bot token and its own port. Only production owns the `falconfox` and
+bot token and its own port. Production owns the `falconfox` and
 `falconfox-telegram` shims in `~/.local/bin`, so a bare `falconfox` in a shell
-always means production:
+always means production. Dev has its own pair in
+`~/.local/state/falconfox-dev/bin`, prepended to its units' `PATH` and
+therefore to every dev session's, so an agent there runs the dev CLI against
+the dev daemon rather than the deployment's CLI against it:
 
 ```sh
 XDG_STATE_HOME=~/.local/state/falconfox-dev \

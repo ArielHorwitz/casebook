@@ -9,7 +9,7 @@ Environment=XDG_STATE_HOME=@HOME@/.local/state/falconfox-dev
 Environment=XDG_CONFIG_HOME=@HOME@/.config/falconfox-dev
 Environment=FALCONFOX_DAEMON=1
 Environment=PYTHONUNBUFFERED=1
-Environment=PATH=@HOME@/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+Environment=PATH=@HOME@/.local/state/falconfox-dev/bin:@HOME@/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
 ExecStart=@REPO@/.venv/bin/falconfox daemon --foreground --port 9725
 Restart=always
 RestartSec=2

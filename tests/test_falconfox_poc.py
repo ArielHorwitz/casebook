@@ -1989,10 +1989,20 @@ class WorkspaceTests(unittest.IsolatedAsyncioTestCase):
                           orientation)
             # Both files, so every agent runtime picks it up natively.
             self.assertEqual(root.joinpath("CLAUDE.md").read_text(), orientation)
-            self.assertEqual(list(root.joinpath(".agents", "skills").iterdir()), [])
+            self.assertFalse(root.joinpath(".agents", "skills").exists())
 
-    def test_a_stale_skill_is_pruned(self):
-        # The skill directory is the bot's to own: one left behind would go on
+    def test_the_manager_gets_one_file_too(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = FalconFoxTelegramBot(BotConfig(
+                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
+            bot._prepare_manager_workspace()
+            orientation = bot.manager_workspace.joinpath("AGENTS.md").read_text()
+            self.assertIn("FalconFox session manager", orientation)
+            self.assertEqual(
+                bot.manager_workspace.joinpath("CLAUDE.md").read_text(), orientation)
+
+    def test_a_skill_from_an_older_version_is_pruned(self):
+        # The directory is the bot's to own: a skill left behind would go on
         # being read beside the file that replaced it.
         with tempfile.TemporaryDirectory() as directory:
             bot = FalconFoxTelegramBot(BotConfig(

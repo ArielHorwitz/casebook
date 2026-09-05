@@ -13,7 +13,6 @@ import shlex
 import shutil
 import time
 from dataclasses import dataclass
-from importlib.resources import files
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -565,55 +564,70 @@ class FalconFoxTelegramBot:
             if event.get("type") == "message" and event.get("role") == "agent"
         )
 
-    SKILL_NAME = "falconfox-sessions"
 
-    def _prepare_workspace(self, root: Path, skill: Optional[str],
-                           orientation: str) -> None:
+    def _prepare_workspace(self, root: Path, orientation: str) -> None:
+        """Write the workspace an infrastructure session runs in.
+
+        Its whole content is the orientation, in both files so that every agent
+        runtime picks it up natively. Skills used to live here too and no
+        longer do: a file is read whether or not an agent judges a skill
+        relevant, and these two sessions have exactly one job each to describe.
+        """
         root.mkdir(parents=True, exist_ok=True)
+        # Prune what earlier versions installed. The directory is the bot's to
+        # own, so a skill left behind would go on being read beside the file
+        # that replaced it -- the same silent conflict that made renaming one
+        # a bug the first time.
         skills_root = root.joinpath(".agents", "skills")
-        skills_root.mkdir(parents=True, exist_ok=True)
-        # Reconcile rather than write additively (bugs.md, fixed here): the
-        # skill directory is owned by the bot, so a renamed or split skill
-        # must not leave the old one discoverable beside the new. Before this,
-        # renaming the skill left the agent reading *both*, with conflicting
-        # instructions -- a silent failure that blocked exactly this rename.
-        for stale in skills_root.iterdir():
-            if stale.is_dir() and (skill is None or stale.name != skill):
-                shutil.rmtree(stale, ignore_errors=True)
-                log.info("pruned stale manager skill: %s", stale.name)
-        if skill is not None:
-            skill_dir = skills_root.joinpath(skill)
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            packaged_skill = files("falconfox_telegram").joinpath(
-                "skills", skill, "SKILL.md"
-            ).read_text()
-            skill_dir.joinpath("SKILL.md").write_text(packaged_skill)
-        # Claude discovers skills under .claude/skills; bridge with a symlink.
-        claude_dir = root.joinpath(".claude")
-        claude_dir.mkdir(exist_ok=True)
-        skills_link = claude_dir.joinpath("skills")
-        if not skills_link.is_symlink() and not skills_link.exists():
-            skills_link.symlink_to(Path("..", ".agents", "skills"))
-        # Both files, so every agent runtime picks the orientation up natively.
+        if skills_root.is_dir():
+            for stale in skills_root.iterdir():
+                if stale.is_dir():
+                    shutil.rmtree(stale, ignore_errors=True)
+                    log.info("pruned stale workspace skill: %s", stale.name)
         root.joinpath("AGENTS.md").write_text(orientation)
         root.joinpath("CLAUDE.md").write_text(orientation)
 
     def _prepare_manager_workspace(self) -> None:
-        orientation = (
-            "You are the FalconFox Telegram session manager, running in the "
-            "General topic of a forum where every session has its own topic. "
-            "You are NOT a work agent — you manage the session lifecycle "
-            "(spawn, rename, stop, delete), you do not work inside sessions. "
-            "There is no focus pointer and no routing decision to make: the "
-            "user talks to a session by writing in its topic. For every user "
-            f"message, follow the {self.SKILL_NAME} skill "
-            f"(.agents/skills/{self.SKILL_NAME}). You may run any `falconfox` "
-            "command and nothing else. Confirm the target back to the user "
-            "before `stop` or `delete`. Never orient on or work in any "
-            "project. When greeting or unsure, ask what the user wants.\n"
-        )
+        orientation = """# FalconFox session manager
+
+FalconFox is a daemon that runs agent sessions, each with its own working
+directory and transcript. This forum is one of its clients: every session gets
+a topic here, and the user talks to a session by writing in that topic. You are
+the manager, in General, and what belongs to you is the session lifecycle -
+spawning, renaming, stopping, deleting.
+
+**Spawning.** `falconfox spawn --path <path> [--name <name>] [--backend
+<name>]`. The bot notices the new session and gives it a topic; you never
+create topics yourself. `--backend` picks which agent runs it, from the
+backends in the user's config. Run `falconfox spawn --help` for the current
+flags, and pass a requested model or backend through rather than saying it
+cannot be done.
+
+**Identifying a session.** `falconfox list` gives id, name, path and state.
+References are often spoken and fuzzy, so pick the closest match and say which
+one you chose. If a topic is genuinely ambiguous, the user can ask the agent in
+it: every session knows its own id, from FALCONFOX_SESSION_ID in its
+environment. Offer a rename if you encounter an ambiguous request and cannot
+definitively identify a session.
+
+**Managing.** `falconfox rename <id> <name>` retitles the topic with it.
+`falconfox stop <id>` shuts the agent down and frees the slot it holds; the
+session keeps its transcript and wakes on its next message, which is how a busy
+forum stays under the live-session limit. `falconfox delete <id>` discards the
+session and removes its topic. Stopping a session that was never used deletes
+it instead, since there is nothing to keep.
+
+**Be certain of the target before deleting.** There is no undo, and messages
+here may have been transcribed from speech, so a reference you half-recognise
+is worth reading back first; an unambiguous one is not. The daemon refuses to
+let a session stop or delete itself, so you cannot end this chat by accident.
+
+Project work belongs in a session's own topic, where it has an agent, a
+directory and a transcript of its own. Point the user there rather than doing
+it here. When greeting or unsure, ask what they want.
+"""
         self.manager_workspace = self.state_dir
-        self._prepare_workspace(self.manager_workspace, self.SKILL_NAME, orientation)
+        self._prepare_workspace(self.manager_workspace, orientation)
 
     def _prepare_concierge_workspace(self) -> None:
         """Everything the private chat needs, in the one file it reads.
@@ -674,7 +688,7 @@ That is a preference, not a prohibition. If the forum is broken and this is the
 only channel left, repairing FalconFox from here is what this chat is for.
 """
         self.concierge_workspace = self.state_dir.joinpath("concierge")
-        self._prepare_workspace(self.concierge_workspace, None, orientation)
+        self._prepare_workspace(self.concierge_workspace, orientation)
 
     async def _ensure_manager(self) -> str | None:
         """The manager session, spawned on demand.

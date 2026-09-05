@@ -15,7 +15,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from falconfox.cli import CliError, _guard_self_target, build_parser, cmd_daemon
-from falconfox import config
+from falconfox import __version__ as falconfox_version
+from falconfox import config, get_version
 from falconfox.coordinator import SessionCoordinator
 from falconfox.errors import FalconFoxError
 from falconfox.engine.session import AgentSession
@@ -1970,6 +1971,32 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bot._ws.sent[0]["ok"])
             self.assertIn("too big", bot._ws.sent[0]["error"])
             self.assertIn("Could not send report.txt", bot.telegram.messages[0][1])
+
+
+class VersionTests(unittest.TestCase):
+    """Which answer wins when the build-time stamp and git disagree."""
+
+    def setUp(self):
+        get_version.cache_clear()
+        self.addCleanup(get_version.cache_clear)
+
+    def test_live_git_beats_a_stale_stamp(self):
+        # The editable-install case: the stamp is written once and the source
+        # moves afterwards, which is what installing that way is for.
+        with patch("falconfox._git_commit", return_value="abc1234"), \
+                patch("falconfox._git_dirty", return_value=False), \
+                patch("falconfox._baked_version", return_value="0.1.0-old0000-dirty"):
+            self.assertEqual(get_version(), "0.1.0-abc1234")
+
+    def test_the_stamp_is_used_when_there_is_no_repository(self):
+        with patch("falconfox._git_commit", return_value=None), \
+                patch("falconfox._baked_version", return_value="0.1.0-abc1234"):
+            self.assertEqual(get_version(), "0.1.0-abc1234")
+
+    def test_neither_leaves_the_bare_version(self):
+        with patch("falconfox._git_commit", return_value=None), \
+                patch("falconfox._baked_version", return_value=None):
+            self.assertEqual(get_version(), falconfox_version)
 
 
 class UploadKindTests(unittest.TestCase):

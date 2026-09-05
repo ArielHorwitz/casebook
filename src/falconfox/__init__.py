@@ -14,17 +14,21 @@ __version__ = "0.1.0"
 def get_version() -> str:
     """Package version, suffixed with the git commit and dirty flag when that is known.
 
-    Prefers the commit stamped into ``_version.py`` at build time (present in installed
-    wheels), then falls back to live git for a plain source checkout, then to the bare
-    ``__version__`` when neither is available.
+    Live git wins where there is a repository to ask, and the commit stamped into
+    ``_version.py`` at build time is the fallback for an installed wheel, which has
+    none. That order matters for an editable install: the stamp is written once, at
+    build time, while the source is free to move afterwards -- which is the entire
+    point of installing that way. Preferring the stamp there means a running daemon
+    reports the revision it was *installed* at, and calls itself dirty long after the
+    edits were committed.
     """
+    commit = _git_commit()
+    if commit is not None:
+        return _format_version(commit, _git_dirty())
     baked = _baked_version()
     if baked is not None:
         return baked
-    commit = _git_commit()
-    if commit is None:
-        return __version__
-    return _format_version(commit, _git_dirty())
+    return __version__
 
 
 def _format_version(commit: str, dirty: bool) -> str:

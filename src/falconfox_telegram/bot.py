@@ -179,6 +179,25 @@ def _upload_kind(source: Path, raw: bool) -> tuple[str, str]:
     return method, field
 
 
+# Every chat command, in the order they are worth learning. Plain text rather
+# than a code block when sent: Telegram makes a bare /command tappable, and a
+# monospaced list that has to be retyped is a worse help message than a ragged
+# one that does not.
+COMMANDS = (
+    ("/help", "this list"),
+    ("/status", "the daemon, the topics it knows, and any turn in flight"),
+    ("/list", "every session the daemon has"),
+    ("/id", "this chat's session id, as a block to copy"),
+    ("/new [path] [name]", "spawn a session, defaulting to the default path"),
+    ("/home [name]", "spawn a session in the default path"),
+    ("/name <name>", "rename this topic's session"),
+    ("/sh <command>", "run a command on the host, detached in tmux"),
+    ("/jobs", "shell jobs this bot has started"),
+    ("/tail <id>", "re-read a job's output"),
+    ("/kill <id>", "stop a running job"),
+)
+
+
 def _sent_length(text: str) -> int:
     """How long `text` is once Telegram HTML-escaped: the length that counts
     against the message limit, which for markup-heavy output is far more than
@@ -1101,6 +1120,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
             return True
         # /switch is gone with the pointer: a session is addressed by writing
         # in its topic, so there is nothing left to switch.
+        if command == "/help":
+            await self._say(dest, "\n".join(
+                ["FalconFox commands:"]
+                + [f"{usage} — {what}" for usage, what in COMMANDS]))
+            return True
         if command == "/id":
             # A topic's own session id, in a block to tap and copy. The chat
             # shows names, and names are ambiguous exactly when it matters:

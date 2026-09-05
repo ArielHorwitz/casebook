@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 from dataclasses import replace
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import tomllib
@@ -26,7 +28,7 @@ from falconfox_telegram.api import ApiError, _json_request
 from falconfox_telegram.bot import (BUSY_TURN, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
-from falconfox_telegram.bot import PHOTO_LIMIT_BYTES, _upload_kind
+from falconfox_telegram.bot import COMMANDS, PHOTO_LIMIT_BYTES, _upload_kind
 from falconfox_telegram.shell import ShellRunner, tail
 
 
@@ -2156,6 +2158,26 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             bot._bind("abcd1234", 42)
             await bot._command(Dest(-1001, 42), "/sh whoami")
             self.assertEqual(bot._shell.calls, [("whoami", Path("/tmp"))])
+
+    async def test_help_lists_every_command_that_is_dispatched(self):
+        # The list and the dispatcher are separate, so this reads the command
+        # literals back out of `_command` itself: a command added without a
+        # line in COMMANDS is invisible, which is the whole failure mode of
+        # keeping help by hand.
+        source = inspect.getsource(FalconFoxTelegramBot._command)
+        dispatched = set(re.findall(r'command (?:==|in \(?)\s*"(/[a-z]+)"', source))
+        dispatched |= set(re.findall(r'"(/[a-z]+)"', source.split("if command", 1)[1]))
+        listed = {usage.split()[0] for usage, _ in COMMANDS}
+        self.assertTrue(dispatched, "found no commands to check against")
+        self.assertEqual(dispatched - listed, set())
+
+    async def test_help_is_plain_text_so_the_commands_stay_tappable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._command(Dest(-1001, None), "/help")
+            body = bot.telegram.messages[0][1]
+            self.assertIn("/sh <command>", body)
+            self.assertEqual(bot.telegram.html_messages, [])
 
     async def test_id_answers_with_the_topic_s_session(self):
         with tempfile.TemporaryDirectory() as directory:

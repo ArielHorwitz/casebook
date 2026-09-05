@@ -605,10 +605,11 @@ cannot be done.
 
 **Identifying a session.** `falconfox list` gives id, name, path and state.
 References are often spoken and fuzzy, so pick the closest match and say which
-one you chose. If a topic is genuinely ambiguous, the user can send `/id` in it
-and get its session id back, or ask the agent there, which knows its own id
-from FALCONFOX_SESSION_ID. Offer a rename if you encounter an ambiguous request
-and cannot definitively identify a session.
+one you chose. When a topic is genuinely ambiguous, `/id` sent in it answers
+with its session id, which is the cheap way to ask. Every session also knows
+its own id, from FALCONFOX_SESSION_ID in its environment, but asking the agent
+costs a turn. Offer a rename if you encounter an ambiguous request and cannot
+definitively identify a session.
 
 **Managing.** `falconfox rename <id> <name>` retitles the topic with it.
 `falconfox stop <id>` shuts the agent down and frees the slot it holds; the

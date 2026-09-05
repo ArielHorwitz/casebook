@@ -566,9 +566,9 @@ class FalconFoxTelegramBot:
         )
 
     SKILL_NAME = "falconfox-sessions"
-    SETUP_SKILL_NAME = "falconfox-setup"
 
-    def _prepare_workspace(self, root: Path, skill: str, orientation: str) -> None:
+    def _prepare_workspace(self, root: Path, skill: Optional[str],
+                           orientation: str) -> None:
         root.mkdir(parents=True, exist_ok=True)
         skills_root = root.joinpath(".agents", "skills")
         skills_root.mkdir(parents=True, exist_ok=True)
@@ -578,15 +578,16 @@ class FalconFoxTelegramBot:
         # renaming the skill left the agent reading *both*, with conflicting
         # instructions -- a silent failure that blocked exactly this rename.
         for stale in skills_root.iterdir():
-            if stale.is_dir() and stale.name != skill:
+            if stale.is_dir() and (skill is None or stale.name != skill):
                 shutil.rmtree(stale, ignore_errors=True)
                 log.info("pruned stale manager skill: %s", stale.name)
-        skill_dir = skills_root.joinpath(skill)
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        packaged_skill = files("falconfox_telegram").joinpath(
-            "skills", skill, "SKILL.md"
-        ).read_text()
-        skill_dir.joinpath("SKILL.md").write_text(packaged_skill)
+        if skill is not None:
+            skill_dir = skills_root.joinpath(skill)
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            packaged_skill = files("falconfox_telegram").joinpath(
+                "skills", skill, "SKILL.md"
+            ).read_text()
+            skill_dir.joinpath("SKILL.md").write_text(packaged_skill)
         # Claude discovers skills under .claude/skills; bridge with a symlink.
         claude_dir = root.joinpath(".claude")
         claude_dir.mkdir(exist_ok=True)
@@ -615,21 +616,65 @@ class FalconFoxTelegramBot:
         self._prepare_workspace(self.manager_workspace, self.SKILL_NAME, orientation)
 
     def _prepare_concierge_workspace(self) -> None:
+        """Everything the private chat needs, in the one file it reads.
+
+        Split across an orientation and a skill, the orientation existed mostly
+        to point at the skill. One file is read whether or not the agent
+        decides a skill is relevant, which for the channel of last resort is
+        the property that matters.
+        """
         bot_name = self._bot_username or "your_bot"
-        orientation = (
-            "You are the FalconFox private chat: the channel that works "
-            "without any configuration, so it is where the user arrives "
-            "before a forum exists and returns if the forum breaks, and it is "
-            "also the general help and meta channel. For every user message, "
-            f"follow the {self.SETUP_SKILL_NAME} skill "
-            f"(.agents/skills/{self.SETUP_SKILL_NAME}). Your bot username is "
-            f"@{bot_name}. Read what the user actually wants rather than "
-            "assuming something is broken. You may run any `falconfox` "
-            "command and nothing else; never do project work here.\n"
-        )
+        orientation = f"""# FalconFox private chat
+
+FalconFox is a daemon that runs agent sessions and connects them to a Telegram
+forum, where each session gets its own topic and the user talks to it by
+writing there. You are the private chat: the one channel that needs no
+configuration, so it is where the user arrives before a forum exists, and
+where they come back if the forum breaks. It is also the general help and meta
+channel.
+
+Read what the user actually wants: set things up when they want to start,
+diagnose when they report something wrong, answer when they ask. Most messages
+here are about none of those, so do not sweep for problems on every one.
+
+## Find out rather than assume
+
+FalconFox moves fast, so anything written here about its current state would be
+stale before you read it. Run `falconfox` commands, ask Telegram, and say what
+you found.
+
+## Three things you cannot discover by looking
+
+Facts about Telegram, not about this deployment:
+
+1. A bot cannot create a group, and cannot enable Topics. Both are the user's
+   to do; everything after them can be automated. Never imply otherwise.
+2. Topics must be enabled *before* the bot is added. Enabling them upgrades the
+   group to a supergroup and changes its chat id, so a bot added first holds an
+   id that goes stale moments later. This is the most likely way a setup
+   silently half-works.
+3. The bot can be added already promoted, in one tap, with
+   `https://t.me/{bot_name}?startgroup&admin=manage_topics`. Offer the link
+   rather than describing permission screens.
+
+So the short path is: the user creates a group and enables Topics, then taps
+that link. The bot learns the group by being added and checks the rest itself.
+
+A working forum is a supergroup with `is_forum`, the bot an administrator, and
+`can_manage_topics`. When one is missing, say which one. "The bot is not an
+admin there" is useful; "setup failed" is not.
+
+## Where work belongs
+
+Work belongs in a session's own topic, which has its own agent, directory and
+transcript. This chat has none of those, so when the user wants work done, help
+them get a forum and suggest a topic for it.
+
+That is a preference, not a prohibition. If the forum is broken and this is the
+only channel left, repairing FalconFox from here is what this chat is for.
+"""
         self.concierge_workspace = self.state_dir.joinpath("concierge")
-        self._prepare_workspace(self.concierge_workspace,
-                                self.SETUP_SKILL_NAME, orientation)
+        self._prepare_workspace(self.concierge_workspace, None, orientation)
 
     async def _ensure_manager(self) -> str | None:
         """The manager session, spawned on demand.

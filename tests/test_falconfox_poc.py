@@ -1973,6 +1973,37 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Could not send report.txt", bot.telegram.messages[0][1])
 
 
+class WorkspaceTests(unittest.IsolatedAsyncioTestCase):
+    """What the bot writes into a workspace it owns."""
+
+    def test_the_private_chat_gets_one_file_and_no_skill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = FalconFoxTelegramBot(BotConfig(
+                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
+            bot._bot_username = "a_bot"
+            bot._prepare_concierge_workspace()
+            root = bot.concierge_workspace
+            orientation = root.joinpath("AGENTS.md").read_text()
+            self.assertIn("FalconFox private chat", orientation)
+            self.assertIn("https://t.me/a_bot?startgroup&admin=manage_topics",
+                          orientation)
+            # Both files, so every agent runtime picks it up natively.
+            self.assertEqual(root.joinpath("CLAUDE.md").read_text(), orientation)
+            self.assertEqual(list(root.joinpath(".agents", "skills").iterdir()), [])
+
+    def test_a_stale_skill_is_pruned(self):
+        # The skill directory is the bot's to own: one left behind would go on
+        # being read beside the file that replaced it.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = FalconFoxTelegramBot(BotConfig(
+                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
+            stale = Path(directory).joinpath("concierge", ".agents", "skills", "old")
+            stale.mkdir(parents=True)
+            stale.joinpath("SKILL.md").write_text("outdated")
+            bot._prepare_concierge_workspace()
+            self.assertFalse(stale.exists())
+
+
 class VersionTests(unittest.TestCase):
     """Which answer wins when the build-time stamp and git disagree."""
 

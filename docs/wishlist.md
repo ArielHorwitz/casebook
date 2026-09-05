@@ -209,6 +209,25 @@ Deferred because it is a second producer for a channel whose first one, the
 FalconFox session context, is not built yet. Worth doing right after, and not
 before.
 
+## Remove the workspace skill pruning
+
+*From the orientation rewrite, 2026-09-05.*
+
+`_prepare_workspace` deletes any skill directory it finds under a workspace's
+`.agents/skills`. Nothing writes one any more: the manager and private chat
+carry their instructions in `AGENTS.md`, and the packaged skills are gone. The
+prune exists only for workspaces created by an earlier version, where a stale
+skill would go on being read beside the file that replaced it.
+
+There are exactly two such workspaces per deployment, and preparing them
+happens on every start, so one restart of each instance is enough to clean
+every one that will ever exist. After that the code runs forever to fix a
+state that can no longer occur.
+
+Left in deliberately rather than skipped: deleting it in the same change that
+created the mess would have been a bet that every instance had already
+restarted.
+
 ## Deliberately not planned
 
 **Off-loopback remote access + bearer token.** Listed in the pivot case as the

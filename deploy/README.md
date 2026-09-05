@@ -209,6 +209,14 @@ Failures are answered rather than logged: no client connected, no topic to
 send to, over Telegram's 50MB limit, or whatever Telegram itself said. The
 size check happens in the CLI so the agent hears it from the command it ran.
 
+The bot picks how to send it from the file's type: images become photos, GIFs
+animations, MP4s videos, and everything else arrives as a plain file. That is
+the client's decision, not the command's -- `attach` knows only that it has a
+file. `--raw` says fidelity matters more than display, which matters because
+Telegram re-encodes photos: invisible on a photograph, very visible on a
+screenshot of text. Images past 10MB, and photos Telegram refuses for their
+dimensions, fall back to a plain file rather than failing.
+
 ## Updating (the dogfooding loop)
 
 Development happens in `.worktrees/` under the development checkout (or

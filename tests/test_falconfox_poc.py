@@ -25,6 +25,7 @@ from falconfox_telegram.api import ApiError, _json_request
 from falconfox_telegram.bot import (BUSY_TURN, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
+from falconfox_telegram.bot import PHOTO_LIMIT_BYTES, _upload_kind
 from falconfox_telegram.shell import ShellRunner, tail
 
 
@@ -379,6 +380,8 @@ class FakeTelegram:
         self.action_error = None
         self.documents = []
         self.document_error = None
+        # Methods that succeed anyway, for testing a fallback.
+        self.document_ok = set()
         self._next_id = 100
 
     async def message(self, chat_id, text, reply_to=None, silent=False, thread=None):
@@ -388,10 +391,12 @@ class FakeTelegram:
         self._next_id += 1
         return self._next_id
 
-    async def send_document(self, chat_id, file_path, caption=None, thread=None):
-        if self.document_error is not None:
-            raise self.document_error
-        self.documents.append((chat_id, thread, file_path, caption))
+    async def send_file(self, chat_id, file_path, method="sendDocument",
+                        field="document", caption=None, thread=None):
+        error = self.document_error
+        if error is not None and method not in self.document_ok:
+            raise error
+        self.documents.append((chat_id, thread, file_path, caption, method))
 
     async def html_message(self, chat_id, html_text, plain_fallback, reply_to=None,
                            thread=None):
@@ -1910,7 +1915,7 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 "session_id": "abcd1234", "path": str(target),
                 "caption": "here", "request_id": "req1"})
             self.assertEqual(bot.telegram.documents,
-                             [(-1001, 42, target, "here")])
+                             [(-1001, 42, target, "here", "sendDocument")])
             self.assertEqual(bot._ws.sent, [{"action": "attachment_result",
                                              "request_id": "req1", "ok": True,
                                              "error": None}])
@@ -1938,6 +1943,21 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bot._ws.sent[0]["ok"])
             self.assertIn("no chat", bot._ws.sent[0]["error"])
 
+    async def test_a_refused_photo_still_arrives_as_a_file(self):
+        # A tall screenshot exceeds Telegram's photo dimensions. Reporting a
+        # failure would deny the user a file that could have arrived.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("abcd1234", 42)
+            target = Path(directory).joinpath("tall.png")
+            target.write_text("x")
+            bot.telegram.document_error = ApiError("PHOTO_INVALID_DIMENSIONS")
+            bot.telegram.document_ok = {"sendDocument"}
+            await bot._deliver_attachment({
+                "session_id": "abcd1234", "path": str(target), "request_id": "req5"})
+            self.assertEqual([row[4] for row in bot.telegram.documents], ["sendDocument"])
+            self.assertTrue(bot._ws.sent[0]["ok"])
+
     async def test_an_upload_failure_is_reported_and_said(self):
         with tempfile.TemporaryDirectory() as directory:
             bot = self._bot(directory)
@@ -1950,6 +1970,35 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bot._ws.sent[0]["ok"])
             self.assertIn("too big", bot._ws.sent[0]["error"])
             self.assertIn("Could not send report.txt", bot.telegram.messages[0][1])
+
+
+class UploadKindTests(unittest.TestCase):
+    """Displayed in the chat, or exactly as it is."""
+
+    def test_images_and_video_are_sent_to_be_seen(self):
+        self.assertEqual(_upload_kind(Path("shot.png"), False), ("sendPhoto", "photo"))
+        self.assertEqual(_upload_kind(Path("a.jpg"), False), ("sendPhoto", "photo"))
+        self.assertEqual(_upload_kind(Path("loop.gif"), False),
+                         ("sendAnimation", "animation"))
+        self.assertEqual(_upload_kind(Path("clip.mp4"), False), ("sendVideo", "video"))
+
+    def test_anything_else_is_sent_as_it_is(self):
+        self.assertEqual(_upload_kind(Path("notes.txt"), False),
+                         ("sendDocument", "document"))
+        self.assertEqual(_upload_kind(Path("archive.tar.gz"), False),
+                         ("sendDocument", "document"))
+
+    def test_raw_overrides_the_type(self):
+        # Telegram re-encodes photos, which is invisible on a photograph and
+        # very visible on a screenshot of text.
+        self.assertEqual(_upload_kind(Path("shot.png"), True),
+                         ("sendDocument", "document"))
+
+    def test_an_image_past_the_photo_limit_is_sent_as_a_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            big = Path(directory, "big.png")
+            big.write_bytes(b"0" * (PHOTO_LIMIT_BYTES + 1))
+            self.assertEqual(_upload_kind(big, False), ("sendDocument", "document"))
 
 
 class ShellRunnerTests(unittest.IsolatedAsyncioTestCase):

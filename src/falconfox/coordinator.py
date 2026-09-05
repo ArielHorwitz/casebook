@@ -566,6 +566,7 @@ class SessionCoordinator:
 
     async def attach(self, session_id: str, path: str,
                      caption: Optional[str] = None, ack: bool = True,
+                     raw: bool = False,
                      timeout: float = ATTACHMENT_TIMEOUT) -> dict:
         """Hand a file to whichever client is showing this session.
 
@@ -587,9 +588,12 @@ class SessionCoordinator:
         if ack:
             waiter = asyncio.get_running_loop().create_future()
             self._attachments[request_id] = waiter
+        # `raw` is a hint, not an instruction: the daemon has no idea what a
+        # client can do with a file, only that this one should not be degraded
+        # to display it.
         self._emit({"type": "attachment", "session_id": session_id,
                     "path": str(source.resolve()), "caption": caption,
-                    "request_id": request_id})
+                    "raw": bool(raw), "request_id": request_id})
         if waiter is None:
             return {"request_id": request_id, "delivered": None}
         try:

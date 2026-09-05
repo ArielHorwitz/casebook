@@ -169,20 +169,25 @@ class TelegramApi:
         result = await self.call("sendMessage", body)
         return (result or {}).get("message_id")
 
-    async def send_document(self, chat_id: int, file_path: Path,
-                            caption: str | None = None,
-                            thread: int | None = None) -> None:
-        """Upload a file to a chat. Raises ApiError with Telegram's own reason."""
+    async def send_file(self, chat_id: int, file_path: Path, method: str = "sendDocument",
+                        field: str = "document", caption: str | None = None,
+                        thread: int | None = None) -> None:
+        """Upload a file to a chat. Raises ApiError with Telegram's own reason.
+
+        `method` and `field` are how the same upload becomes a photo, a video
+        or a plain file: Telegram varies only the endpoint and the form field
+        name, and the body is built the same way for all of them.
+        """
         fields = {"chat_id": str(chat_id)}
         if caption:
             fields["caption"] = caption
         if thread is not None:
             fields["message_thread_id"] = str(thread)
-        body, content_type = _multipart(fields, "document", file_path)
+        body, content_type = _multipart(fields, field, file_path)
 
         def perform():
             request = urllib.request.Request(
-                f"{self.base_url}/sendDocument", data=body, method="POST",
+                f"{self.base_url}/{method}", data=body, method="POST",
                 headers={"Content-Type": content_type})
             try:
                 # Longer than the JSON timeout: this is an upload, and the
@@ -198,7 +203,7 @@ class TelegramApi:
             except (urllib.error.URLError, OSError) as error:
                 raise ApiError(f"{type(error).__name__}: {error}") from error
             if not payload.get("ok"):
-                raise ApiError(payload.get("description", "sendDocument failed"))
+                raise ApiError(payload.get("description", f"{method} failed"))
 
         await asyncio.get_running_loop().run_in_executor(_REQUESTS, perform)
 

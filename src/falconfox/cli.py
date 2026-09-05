@@ -100,7 +100,7 @@ def cmd_attach(args) -> None:
                            f"{MAX_ATTACHMENT_BYTES // 1_000_000}MB limit")
         _request("POST", f"/api/sessions/{session_id}/attach",
                  {"path": str(source.resolve()), "caption": args.caption,
-                  "ack": not args.no_ack})
+                  "ack": not args.no_ack, "raw": args.raw})
         print(f"sent {source.name}" if not args.no_ack
               else f"handed {source.name} to the client")
 
@@ -229,6 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
     attach.add_argument("--caption", default=None, help="text shown with the file")
     attach.add_argument("--no-ack", action="store_true",
                         help="do not wait for the client to confirm delivery")
+    attach.add_argument("--raw", action="store_true",
+                        help="send the file as-is, without the client "
+                             "compressing it (images are compressed by default "
+                             "so they display in the chat)")
     attach.set_defaults(func=cmd_attach)
 
     daemon = sub.add_parser("daemon", help="start or manage the daemon")

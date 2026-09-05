@@ -7,6 +7,7 @@ import contextlib
 import html
 import json
 import logging
+import mimetypes
 import os
 import shlex
 import shutil
@@ -143,6 +144,42 @@ class BotConfig:
 # If that lands, move audio to `upload_voice` or move streaming to one of the
 # unused actions (`choose_sticker` aside, `find_location`, `upload_photo`, the
 # video ones).
+# Telegram's own ceiling for a compressed photo, against 50MB for a file.
+PHOTO_LIMIT_BYTES = 10 * 1000 * 1000
+# What each media type buys over a plain file: rendering in the chat instead of
+# a download. Everything absent from here is sent as-is.
+_UPLOAD_KINDS = {
+    "image/jpeg": ("sendPhoto", "photo"),
+    "image/png": ("sendPhoto", "photo"),
+    "image/webp": ("sendPhoto", "photo"),
+    "image/gif": ("sendAnimation", "animation"),
+    "video/mp4": ("sendVideo", "video"),
+}
+
+
+def _upload_kind(source: Path, raw: bool) -> tuple[str, str]:
+    """How to send this file: displayed in the chat, or exactly as it is.
+
+    `raw` is the caller saying fidelity matters more than convenience --
+    Telegram re-encodes photos, which is invisible on a photograph and very
+    visible on a screenshot of text.
+    """
+    if raw:
+        return "sendDocument", "document"
+    kind, _ = mimetypes.guess_type(source.name)
+    method, field = _UPLOAD_KINDS.get(kind or "", ("sendDocument", "document"))
+    if method == "sendPhoto":
+        try:
+            oversized = source.stat().st_size > PHOTO_LIMIT_BYTES
+        except OSError:
+            # Unreadable is the upload's problem to report, not this
+            # function's to guess about. Downgrading here would hide it.
+            oversized = False
+        if oversized:
+            return "sendDocument", "document"
+    return method, field
+
+
 def _sent_length(text: str) -> int:
     """How long `text` is once Telegram HTML-escaped: the length that counts
     against the message limit, which for markup-heavy output is far more than
@@ -1036,11 +1073,11 @@ class FalconFoxTelegramBot:
         if dest is None:
             error = "this session has no chat to send to"
         else:
+            method, field = _upload_kind(source, bool(event.get("raw")))
             try:
-                await self.telegram.send_document(
-                    dest.chat, source, caption=event.get("caption"),
-                    thread=dest.thread)
-                log.info("attachment sent: session=%s file=%s", session_id, source)
+                await self._upload(dest, source, method, field, event.get("caption"))
+                log.info("attachment sent: session=%s file=%s as=%s",
+                         session_id, source, method)
             except (ApiError, OSError) as failure:
                 error = str(failure)
                 log.warning("attachment failed: session=%s file=%s (%s)",
@@ -1048,6 +1085,26 @@ class FalconFoxTelegramBot:
         if error is not None and dest is not None:
             await self._say(dest, f"Could not send {source.name}: {error}")
         await self._report_attachment(event.get("request_id"), error)
+
+    async def _upload(self, dest: Dest, source: Path, method: str, field: str,
+                      caption: Optional[str]) -> None:
+        """Upload, falling back to a plain file if the rich method refuses.
+
+        Telegram rejects a photo whose sides sum past 10000 or whose ratio
+        exceeds 20 -- which is an ordinary full-page screenshot. Failing there
+        would deny the user a file that could have arrived, so the fallback
+        sends it as-is rather than reporting an error.
+        """
+        try:
+            await self.telegram.send_file(dest.chat, source, method, field,
+                                          caption=caption, thread=dest.thread)
+        except ApiError:
+            if method == "sendDocument":
+                raise
+            log.info("%s refused for %s; sending as a file", method, source.name)
+            await self.telegram.send_file(dest.chat, source, "sendDocument",
+                                          "document", caption=caption,
+                                          thread=dest.thread)
 
     def _attachment_dest(self, session_id: str) -> Optional[Dest]:
         """Where a session's files go: its topic, or the chat it lives in."""

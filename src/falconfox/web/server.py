@@ -120,7 +120,8 @@ def create_app(
                 # session, since "did it arrive" is the whole question.
                 return JSONResponse(await coordinator.attach(
                     session_id, body.get("path", ""), body.get("caption"),
-                    ack=bool(body.get("ack", True))))
+                    ack=bool(body.get("ack", True)),
+                    raw=bool(body.get("raw", False))))
             else:
                 return JSONResponse({"error": f"unknown action: {action}"}, status_code=404)
             return JSONResponse(coordinator.get_session(session_id))

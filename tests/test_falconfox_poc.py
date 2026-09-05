@@ -2157,6 +2157,29 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             await bot._command(Dest(-1001, 42), "/sh whoami")
             self.assertEqual(bot._shell.calls, [("whoami", Path("/tmp"))])
 
+    async def test_id_answers_with_the_topic_s_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("abcd1234", 42)
+            bot._topic_names["abcd1234"] = "the work session"
+            await bot._command(Dest(-1001, 42), "/id")
+            _, html_text, plain = bot.telegram.html_messages[0]
+            self.assertIn("<pre>abcd1234</pre>", html_text)
+            self.assertIn("the work session", plain)
+
+    async def test_id_in_general_answers_with_the_manager(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.manager_session_id = "mgr00001"
+            await bot._command(Dest(-1001, None), "/id")
+            self.assertIn("<pre>mgr00001</pre>", bot.telegram.html_messages[0][1])
+
+    async def test_id_says_so_when_nothing_owns_the_topic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._command(Dest(-1001, 99), "/id")
+            self.assertIn("No FalconFox session owns", bot.telegram.messages[0][1])
+
     async def test_output_comes_back_as_a_code_block(self):
         with tempfile.TemporaryDirectory() as directory:
             bot = self._bot(directory)

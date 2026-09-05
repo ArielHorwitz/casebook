@@ -136,6 +136,13 @@ Both units are rendered from `deploy/*.service`:
 Run each from its own checkout: `@REPO@` is filled in from the script's own
 location, so running the wrong one points a unit at the wrong tree.
 
+## Chat commands
+
+`/status`, `/list`, `/new`, `/home`, `/name`, and `/id`, which answers with the
+session id of the topic it was sent in, as a block to tap and copy. Names are
+what the chat shows and names are ambiguous exactly when it matters, so `/id`
+is the way to point the manager at a session without describing it.
+
 ## Running commands from the chat
 
 `/sh <command>` runs a command on the host and replies with its output. In a

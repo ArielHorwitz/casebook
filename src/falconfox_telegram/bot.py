@@ -605,10 +605,10 @@ cannot be done.
 
 **Identifying a session.** `falconfox list` gives id, name, path and state.
 References are often spoken and fuzzy, so pick the closest match and say which
-one you chose. If a topic is genuinely ambiguous, the user can ask the agent in
-it: every session knows its own id, from FALCONFOX_SESSION_ID in its
-environment. Offer a rename if you encounter an ambiguous request and cannot
-definitively identify a session.
+one you chose. If a topic is genuinely ambiguous, the user can send `/id` in it
+and get its session id back, or ask the agent there, which knows its own id
+from FALCONFOX_SESSION_ID. Offer a rename if you encounter an ambiguous request
+and cannot definitively identify a session.
 
 **Managing.** `falconfox rename <id> <name>` retitles the topic with it.
 `falconfox stop <id>` shuts the agent down and frees the slot it holds; the
@@ -1100,6 +1100,17 @@ only channel left, repairing FalconFox from here is what this chat is for.
             return True
         # /switch is gone with the pointer: a session is addressed by writing
         # in its topic, so there is nothing left to switch.
+        if command == "/id":
+            # A topic's own session id, in a block to tap and copy. The chat
+            # shows names, and names are ambiguous exactly when it matters:
+            # asking the manager to act on "the falconfox one" is how the
+            # wrong session gets deleted.
+            session_id = self._chat_session(dest)
+            if session_id is None:
+                await self._say(dest, "No FalconFox session owns this chat.")
+                return True
+            await self._say_block(dest, self._session_label(session_id), session_id)
+            return True
         if command in ("/sh", "/jobs", "/tail", "/kill"):
             await self._shell_command(dest, command, text, parts)
             return True
@@ -1305,6 +1316,21 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 state += ", pane gone"
             lines.append(f"{job.job_id}  [{state}]  {job.cwd}  $ {job.command}")
         return "\n".join(lines)
+
+    def _chat_session(self, dest: Dest) -> Optional[str]:
+        """Which session speaks in this chat: a topic's, or the chat's own."""
+        if dest.chat == self.config.owner_id:
+            return self.concierge_session_id
+        if dest.thread is None:
+            return self.manager_session_id
+        return self._threads.get(dest.thread)
+
+    def _session_label(self, session_id: str) -> str:
+        if session_id == self.manager_session_id:
+            return "This is the session manager."
+        if session_id == self.concierge_session_id:
+            return "This is the private chat."
+        return f"Session {self._topic_names.get(session_id) or session_id}:"
 
     async def _status_report(self) -> str:
         try:

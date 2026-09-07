@@ -2176,6 +2176,28 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
         async def session(self, session_id):
             raise ApiError("no such session")
 
+    async def test_a_hidden_session_never_gets_a_topic(self):
+        # The bug this fixes: /clear spawned a manager, the session_added event
+        # beat the spawn's HTTP response, and the id it was compared against
+        # was still the old one -- so every clear left a "telegram manager"
+        # topic that nothing owned.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.manager_session_id = None
+            thread = await bot._ensure_topic(
+                {"session_id": "new00001", "name": "telegram manager", "hidden": True})
+            self.assertIsNone(thread)
+            self.assertEqual(getattr(bot.telegram, "topics", []), [])
+            self.assertEqual(bot._topics, {})
+
+    async def test_a_visible_session_still_gets_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            thread = await bot._ensure_topic(
+                {"session_id": "abcd1234", "name": "work", "hidden": False})
+            self.assertIsNotNone(thread)
+            self.assertEqual(bot._topics, {"abcd1234": thread})
+
     async def test_clear_replaces_the_manager_session(self):
         with tempfile.TemporaryDirectory() as directory:
             bot = self._bot(directory)

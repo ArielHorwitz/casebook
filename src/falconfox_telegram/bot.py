@@ -858,9 +858,17 @@ only channel left, repairing FalconFox from here is what this chat is for.
         return thread
 
     async def _ensure_topic(self, session: dict) -> int | None:
-        """Give a session a topic, creating one if it has none."""
+        """Give a session a topic, creating one if it has none.
+
+        Hidden sessions get none. They are this client's own plumbing -- the
+        manager speaks in General, the private chat in the private chat -- and
+        the flag is read from the event rather than compared against a
+        remembered id, which is what made this wrong: `session_added` arrives
+        over the websocket before the spawn's HTTP response has been read, so
+        the id to compare against was still the previous one.
+        """
         session_id = session["session_id"]
-        if session_id == self.manager_session_id:
+        if session.get("hidden"):
             return None
         existing = self._topics.get(session_id)
         if existing is not None:

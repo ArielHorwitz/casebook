@@ -188,6 +188,7 @@ COMMANDS = (
     ("/status", "the daemon, the topics it knows, and any turn in flight"),
     ("/list", "every session the daemon has"),
     ("/id", "this chat's session id, as a block to copy"),
+    ("/clear", "start this chat's session over, forgetting the conversation"),
     ("/new [path] [name]", "spawn a session, defaulting to the default path"),
     ("/home [name]", "spawn a session in the default path"),
     ("/name <name>", "rename this topic's session"),
@@ -1125,6 +1126,9 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 ["FalconFox commands:"]
                 + [f"{usage} — {what}" for usage, what in COMMANDS]))
             return True
+        if command == "/clear":
+            await self._clear_chat_session(dest)
+            return True
         if command == "/id":
             # A topic's own session id, in a block to tap and copy. The chat
             # shows names, and names are ambiguous exactly when it matters:
@@ -1341,6 +1345,44 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 state += ", pane gone"
             lines.append(f"{job.job_id}  [{state}]  {job.cwd}  $ {job.command}")
         return "\n".join(lines)
+
+    async def _clear_chat_session(self, dest: Dest) -> None:
+        """Start General or the private chat over with a fresh session.
+
+        Deleting and respawning rather than truncating in place: a new session
+        is told what it is running inside on its first message, which is the
+        one piece of context a cleared session should still have.
+
+        Only for the two infrastructure chats. A work session's conversation
+        is the work, and clearing one from the chat would be a delete with a
+        gentler name.
+        """
+        session_id = self._chat_session(dest)
+        if session_id is None or session_id not in (self.manager_session_id,
+                                                    self.concierge_session_id):
+            await self._say(dest, "/clear is only for General and the private "
+                                  "chat. To start a session over, spawn a new one.")
+            return
+        manager = session_id == self.manager_session_id
+        try:
+            await self.daemon.delete(session_id)
+        except ApiError as error:
+            await self._say(dest, f"Could not clear this session: {error}")
+            return
+        log.info("cleared %s session %s",
+                 "manager" if manager else "concierge", session_id)
+        if manager:
+            self.manager_session_id = None
+        else:
+            self.concierge_session_id = None
+        self._persist_infra()
+        fresh = await (self._ensure_manager() if manager else self._ensure_concierge())
+        if fresh is None:
+            await self._say(dest, "Cleared, but the replacement session could "
+                                  "not be started. Try again in a moment.")
+            return
+        await self._say(dest, f"Cleared. Everything said here before is gone, "
+                              f"and this is a new session ({fresh}).")
 
     def _chat_session(self, dest: Dest) -> Optional[str]:
         """Which session speaks in this chat: a topic's, or the chat's own."""

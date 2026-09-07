@@ -2159,6 +2159,73 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             await bot._command(Dest(-1001, 42), "/sh whoami")
             self.assertEqual(bot._shell.calls, [("whoami", Path("/tmp"))])
 
+    class ClearDaemon:
+        """Records the delete and hands back a new session on spawn."""
+
+        def __init__(self):
+            self.deleted = []
+            self.spawned = []
+
+        async def delete(self, session_id):
+            self.deleted.append(session_id)
+
+        async def spawn(self, **kwargs):
+            self.spawned.append(kwargs)
+            return {"session_id": f"new{len(self.spawned)}"}
+
+        async def session(self, session_id):
+            raise ApiError("no such session")
+
+    async def test_clear_replaces_the_manager_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ClearDaemon()
+            bot.manager_session_id = "mgr00001"
+
+            await bot._command(Dest(-1001, None), "/clear")
+
+            self.assertEqual(bot.daemon.deleted, ["mgr00001"])
+            self.assertEqual(bot.manager_session_id, "new1")
+            # Hidden, so the replacement does not appear as a work session.
+            self.assertTrue(bot.daemon.spawned[0]["hidden"])
+            self.assertIn("this is a new session (new1)", bot.telegram.messages[0][1])
+
+    async def test_clear_replaces_the_private_chat_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ClearDaemon()
+            bot._bot_username = "a_bot"
+            bot.concierge_session_id = "con00001"
+
+            await bot._command(Dest(7, None), "/clear")
+
+            self.assertEqual(bot.daemon.deleted, ["con00001"])
+            self.assertEqual(bot.concierge_session_id, "new1")
+
+    async def test_clear_is_refused_in_a_work_session_topic(self):
+        # A work session's conversation is the work: clearing one from the
+        # chat would be a delete with a gentler name.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ClearDaemon()
+            bot._bind("abcd1234", 42)
+
+            await bot._command(Dest(-1001, 42), "/clear")
+
+            self.assertEqual(bot.daemon.deleted, [])
+            self.assertIn("only for General", bot.telegram.messages[0][1])
+
+    async def test_the_new_id_is_remembered_across_a_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ClearDaemon()
+            bot.manager_session_id = "mgr00001"
+            await bot._command(Dest(-1001, None), "/clear")
+
+            restarted = self._bot(directory)
+            restarted._load_infra()
+            self.assertEqual(restarted.manager_session_id, "new1")
+
     async def test_help_lists_every_command_that_is_dispatched(self):
         # The list and the dispatcher are separate, so this reads the command
         # literals back out of `_command` itself: a command added without a

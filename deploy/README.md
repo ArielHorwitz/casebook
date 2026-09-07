@@ -142,6 +142,13 @@ location, so running the wrong one points a unit at the wrong tree.
 list lives in `COMMANDS` in `bot.py`, and a test reads the command literals
 back out of the dispatcher to catch one added without a line there.
 
+`/clear` starts General or the private chat over: it deletes that chat's
+session and spawns a replacement with the same name and workspace. The new one
+is told what it is running inside on its first message, which is the one piece
+of context a cleared session should keep. It is deliberately not available in a
+work session's topic, where the conversation is the work and clearing would be
+a delete with a gentler name.
+
 Worth knowing about `/id`: it answers with the session id of the topic it was
 sent in, as a block to tap and copy. Names are what the chat shows and names
 are ambiguous exactly when it matters, so `/id` is how to point the manager at

@@ -11,6 +11,14 @@ dependencies = [
     "watchfiles>=0.21",
 ]
 
+# Tests only. `uv sync` installs this by default, so `uv run pytest` works in a
+# checkout with no further ceremony; the deployments pass --no-dev, since a
+# running daemon has no use for a test runner.
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
 [project.scripts]
 falconfox = "falconfox.cli:main"
 falconfox-telegram = "falconfox_telegram.__main__:main"

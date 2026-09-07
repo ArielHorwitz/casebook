@@ -105,7 +105,7 @@ if grep -q "paste-token-here" "$CONFIG_DIR/config.toml"; then
     exit 1
 fi
 
-(cd "$REPO" && uv sync --frozen)
+(cd "$REPO" && uv sync --frozen --no-dev)
 install_units
 install_shims
 systemctl --user enable --now "${UNITS[@]}"

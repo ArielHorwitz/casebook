@@ -2569,6 +2569,111 @@ class TagsCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Could not set tags", bot.telegram.messages[0][1])
 
 
+class SessionListingTests(unittest.IsolatedAsyncioTestCase):
+    """/list: what it says, in what order, and what it drops when it cannot
+    say all of it."""
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        return bot
+
+    class ListDaemon:
+        """Sessions in the order the daemon returns them: by creation, which
+        is exactly the order /list is not supposed to keep."""
+
+        def __init__(self, sessions):
+            self._sessions = sessions
+
+        async def sessions(self, include_hidden=False):
+            return list(self._sessions)
+
+    @staticmethod
+    def _session(session_id, last_active, name="work", path="/tmp"):
+        return {"session_id": session_id, "name": name, "state": "idle",
+                "path": path, "last_active": last_active}
+
+    async def test_list_marks_up_the_ids_so_they_can_be_tapped_to_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ListDaemon([self._session("abcd1234", "2026-09-08T10:00:00")])
+            await bot._command(Dest(-1001, 42), "/list")
+            self.assertEqual(bot.telegram.messages, [],
+                             "a plain send would print the markup literally")
+            _, html_text, plain = bot.telegram.html_messages[0]
+            # The id alone is the code span: a whole-line block would copy the
+            # name and the path with it.
+            self.assertIn("<code>abcd1234</code> work", html_text)
+            self.assertNotIn("<code>", plain)
+            self.assertIn("abcd1234", plain)
+
+    async def test_list_escapes_the_names_it_did_not_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ListDaemon(
+                [self._session("abcd1234", "2026-09-08T10:00:00", name="a < b & c")])
+            await bot._command(Dest(-1001, 42), "/list")
+            html_text = bot.telegram.html_messages[0][1]
+            self.assertIn("a &lt; b &amp; c", html_text)
+
+    async def test_list_orders_by_activity_not_by_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ListDaemon([
+                self._session("oldest01", "2026-09-01T10:00:00", name="stale"),
+                self._session("newest01", "2026-09-08T10:00:00", name="live"),
+                self._session("middle01", "2026-09-05T10:00:00", name="warm"),
+            ])
+            await bot._command(Dest(-1001, 42), "/list")
+            plain = bot.telegram.html_messages[0][2]
+            self.assertEqual([line.split()[0] for line in plain.splitlines()],
+                             ["newest01", "middle01", "oldest01"])
+
+    async def test_list_without_an_activity_stamp_sorts_last_rather_than_crashing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            stamped = self._session("stamped1", "2026-09-08T10:00:00")
+            unstamped = self._session("unknown1", None)
+            del unstamped["last_active"]
+            bot.daemon = self.ListDaemon([unstamped, stamped])
+            await bot._command(Dest(-1001, 42), "/list")
+            plain = bot.telegram.html_messages[0][2]
+            self.assertEqual([line.split()[0] for line in plain.splitlines()],
+                             ["stamped1", "unknown1"])
+
+    async def test_a_long_list_drops_whole_sessions_and_says_how_many(self):
+        # Telegram counts a message's rendered length, so the budget is the
+        # plain text's. Cutting to fit it mid-entry would split a tag and the
+        # whole message would be rejected.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ListDaemon([
+                self._session(f"sess{index:04d}",
+                              f"2026-09-08T10:{59 - index // 60:02d}:00",
+                              path="/home/ariel/projects/" + "x" * 60)
+                for index in range(200)
+            ])
+            await bot._command(Dest(-1001, 42), "/list")
+            _, html_text, plain = bot.telegram.html_messages[0]
+            self.assertLessEqual(len(plain), 4096)
+            lines = plain.splitlines()
+            self.assertRegex(lines[-1], r"^…and \d+ more")
+            self.assertEqual(len(lines) - 1 + int(lines[-1].split()[1]), 200)
+            # Every kept line is whole: the tags survived the cut.
+            self.assertEqual(html_text.count("<code>"), html_text.count("</code>"))
+            self.assertEqual(html_text.count("<code>"), len(lines) - 1)
+
+    async def test_list_says_so_when_there_is_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.daemon = self.ListDaemon([])
+            await bot._command(Dest(-1001, 42), "/list")
+            self.assertEqual(bot.telegram.html_messages[0][2], "No sessions.")
+
+
 class VersionTests(unittest.TestCase):
     """Which answer wins when the build-time stamp and git disagree."""
 

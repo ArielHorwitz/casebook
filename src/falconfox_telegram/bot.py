@@ -12,6 +12,7 @@ import os
 import shlex
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -218,7 +219,7 @@ def _upload_kind(source: Path, raw: bool) -> tuple[str, str]:
 COMMANDS = (
     ("/help", "this list"),
     ("/status", "the daemon, the topics it knows, and any turn in flight"),
-    ("/list", "every session the daemon has"),
+    ("/list", "every session, most recently active first"),
     ("/id", "this chat's session id, as a block to copy"),
     ("/clear", "start this chat's session over, forgetting the conversation"),
     ("/new [path] [name]", "spawn a session, defaulting to the default path"),
@@ -233,13 +234,6 @@ COMMANDS = (
     ("/tail <id>", "re-read a job's output"),
     ("/kill <id>", "stop a running job"),
 )
-
-
-def _sent_length(text: str) -> int:
-    """How long `text` is once Telegram HTML-escaped: the length that counts
-    against the message limit, which for markup-heavy output is far more than
-    len() suggests."""
-    return len(html.escape(text, quote=False))
 
 
 TURN_ACTIONS = {
@@ -280,6 +274,30 @@ def _format_count(count: int) -> str:
     if count >= 1_000:
         return f"{count / 1_000:.0f}k"
     return str(count)
+
+
+# Room left for the "and N more" line when a listing is capped, so that the
+# note itself can never be the thing that pushes the message over.
+LISTING_OVERFLOW_BUDGET = 80
+
+
+def _format_age(when: Optional[str]) -> str:
+    """How long ago, coarsely. `/list` is ordered by this, and an ordering
+    nothing on screen explains reads as no ordering at all."""
+    if not when:
+        return ""
+    try:
+        moment = datetime.fromisoformat(when)
+    except ValueError:
+        return ""
+    seconds = max(0.0, (datetime.now(moment.tzinfo) - moment).total_seconds())
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h ago"
+    return f"{int(seconds // 86400)}d ago"
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -1323,12 +1341,8 @@ only channel left, repairing FalconFox from here is what this chat is for.
             await self._say(dest, await self._status_report())
             return True
         if command == "/list":
-            sessions = await self.daemon.sessions()
-            listing = "\n".join(
-                f"{item['session_id']}  {item['name']}  [{item['state']}]  {item['path']}"
-                for item in sessions
-            ) or "No sessions."
-            await self._say(dest, listing)
+            rich, plain = await self._sessions_listing()
+            await self._say_html(dest, rich, plain)
             return True
         if command in ("/new", "/home"):
             path = (str(self.config.default_path)
@@ -1617,11 +1631,14 @@ only channel left, repairing FalconFox from here is what this chat is for.
         if status is None:
             header.append(f"/tail {job.job_id} · /kill {job.job_id} · "
                           f"tmux attach -t {job.session}")
-        # The budget is what is left of the message once the header and the
-        # <pre> wrapper are paid for, measured after escaping.
-        spent = _sent_length("\n".join(header)) + len("<pre></pre>") + 80
-        body, clipped = tail(job.read_output(), TELEGRAM_MESSAGE_LIMIT - spent,
-                             measure=_sent_length)
+        # The budget is what is left of the message once the header is paid
+        # for. Markup is free: measured against the live API, the 4096 limit
+        # counts a message's rendered length, so the <pre> wrapper costs
+        # nothing and an escaped `&amp;` in the output counts as the one
+        # character it draws. This used to be budgeted after escaping, which
+        # clipped output that would have fit.
+        spent = len("\n".join(header)) + 80
+        body, clipped = tail(job.read_output(), TELEGRAM_MESSAGE_LIMIT - spent)
         if clipped:
             header.append(f"(tail only; whole output in {job.log_path})")
         await self._say_block(dest, "\n".join(header), body or "(no output)")
@@ -1630,6 +1647,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
         if status is None:
             return f"⏳ {job.job_id} still running ({job.elapsed:.0f}s)"
         return f"{'✅' if status == 0 else '❌'} {job.job_id} exited {status}"
+
+    async def _say_html(self, dest: Dest, rich: str, plain: str) -> None:
+        """Send pre-built HTML, with the plain text to fall back to. Both are
+        the caller's: only it knows which parts of the line are markup."""
+        await self.telegram.html_message(dest.chat, rich, plain, thread=dest.thread)
 
     async def _say_block(self, dest: Dest, header: str, body: str) -> None:
         """Send `header` as text and `body` as a code block.
@@ -1643,6 +1665,60 @@ only channel left, repairing FalconFox from here is what this chat is for.
             f"{html.escape(header, quote=False)}\n<pre>{html.escape(body, quote=False)}</pre>",
             f"{header}\n{body}",
             thread=dest.thread)
+
+    async def _sessions_listing(self) -> tuple[str, str]:
+        """Every session as (html, plain), most recently active first.
+
+        The id is a <code> span of its own and the rest of the line is not:
+        an id exists to be pasted into another command, and Telegram makes a
+        code span tap-to-copy while leaving the surrounding text alone. A
+        whole-line block would copy the name and the path along with it,
+        which is the thing being fixed.
+
+        Ordering is by activity because the listing is capped and a cap has
+        to drop something. The session untouched for a week is a better loss
+        than the one being worked in right now.
+        """
+        sessions = await self.daemon.sessions()
+        if not sessions:
+            return "No sessions.", "No sessions."
+        entries = [
+            self._session_entry(item)
+            for item in sorted(sessions,
+                               key=lambda item: item.get("last_active") or "",
+                               reverse=True)
+        ]
+        # Whole entries are dropped, never characters. Telegram counts a
+        # message's rendered length -- markup is free -- so the budget is the
+        # plain line's, and cutting mid-entry could only ever split a tag.
+        budget = TELEGRAM_MESSAGE_LIMIT - LISTING_OVERFLOW_BUDGET
+        kept, spent = [], 0
+        for entry in entries:
+            if spent + len(entry[1]) + 1 > budget:
+                break
+            kept.append(entry)
+            spent += len(entry[1]) + 1
+        rich = [entry[0] for entry in kept]
+        plain = [entry[1] for entry in kept]
+        dropped = len(entries) - len(kept)
+        if dropped:
+            note = f"…and {dropped} more, least recently active."
+            rich.append(note)
+            plain.append(note)
+        return "\n".join(rich), "\n".join(plain)
+
+    def _session_entry(self, item: dict) -> tuple[str, str]:
+        """One session's line, formatted twice: once with the id marked up,
+        once as the plain text that has to survive an HTML send failing."""
+        session_id = item["session_id"]
+        age = _format_age(item.get("last_active"))
+        rest = f" {item['name']} [{item['state']}]"
+        if age:
+            rest += f" · {age}"
+        rest += f" · {item['path']}"
+        return (f"<code>{html.escape(session_id, quote=False)}</code>"
+                f"{html.escape(rest, quote=False)}",
+                f"{session_id}{rest}")
 
     async def _jobs_listing(self) -> str:
         live = await self._shell.live_sessions()

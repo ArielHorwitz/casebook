@@ -753,8 +753,8 @@ Facts about Telegram, not about this deployment:
    id that goes stale moments later. This is the most likely way a setup
    silently half-works.
 3. The bot can be added already promoted, in one tap, with
-   `https://t.me/{bot_name}?startgroup&admin=manage_topics`. Offer the link
-   rather than describing permission screens.
+   `https://t.me/{bot_name}?startgroup&admin=manage_topics+delete_messages`.
+   Offer the link rather than describing permission screens.
 
 So the short path is: the user creates a group and enables Topics, then taps
 that link. The bot learns the group by being added and checks the rest itself.
@@ -762,6 +762,11 @@ that link. The bot learns the group by being added and checks the rest itself.
 A working forum is a supergroup with `is_forum`, the bot an administrator, and
 `can_manage_topics`. When one is missing, say which one. "The bot is not an
 admin there" is useful; "setup failed" is not.
+
+`can_delete_messages` is wanted but not required: the deeplink above asks for
+it, and without it Telegram's "changed the topic icon" notices pile up in the
+chat because the bot cannot clear them. A forum missing only that right is
+working, and saying it is broken would be wrong.
 
 ## Where work belongs
 
@@ -1127,7 +1132,13 @@ only channel left, repairing FalconFox from here is what this chat is for.
             return False, "the bot is not an administrator there"
         if not member.get("can_manage_topics"):
             return False, "the bot lacks the Manage Topics right there"
-        return True, f"{chat.get('title') or chat_id} is a usable forum"
+        usable = f"{chat.get('title') or chat_id} is a usable forum"
+        if not member.get("can_delete_messages"):
+            # Not a failure: everything works, but each tag change leaves a
+            # "changed the topic icon" notice the bot cannot sweep.
+            usable += (" — but without the Delete Messages right, so topic "
+                       "icon notices will stay in the chat")
+        return True, usable
 
     async def _maybe_adopt_forum(self, chat_id: int) -> None:
         """Take a group as the forum when there is no working one."""

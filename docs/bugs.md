@@ -8,6 +8,21 @@ Record what fails, under what conditions, and how bad it is — enough that
 whoever picks it up does not have to rediscover it. Delete the entry when the
 fix lands.
 
+## Chat actions lag the session's state
+
+*Reported from use, 2026-09-08. Not investigated.*
+
+The actions the bot uses to show what a session is doing (typing, sending a
+file, recording voice) seem to be delayed somewhat behind the state they
+report.
+
+## An extra "Working..." message appears after the reply
+
+*Reported from use, 2026-09-08. Not investigated.*
+
+Every so often an *extra* "Working..." message appears after the final
+response has already arrived, and then never resolves to anything.
+
 ## Deleting a topic by hand strands its session
 
 *Found by reasoning through the forum rework, 2026-08-30. Not yet hit in use.*

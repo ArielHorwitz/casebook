@@ -41,3 +41,12 @@ fast = "off"
 # [backends.fable]
 # command = ["claude-agent-acp"]
 # env = { CLAUDE_CODE_OAUTH_TOKEN = "paste-token-here", ANTHROPIC_MODEL = "claude-fable-5" }
+
+# Telegram forum topic icons, one per session tag (`falconfox tag <id> ...`).
+# No default: uncomment and use your own vocabulary, since FalconFox attaches
+# no meaning to a tag. Values are the emoji itself; only Telegram's fixed set
+# of topic icons is allowed, and anything else is skipped with a warning.
+# [telegram.topic_icons]
+# archived = "📁"
+# urgent = "❗️"
+# review = "👀"

@@ -160,6 +160,34 @@ done now because it is a question about what tags *mean* on a session with no
 topic, and answering it in passing while splitting `/help` would have been
 guessing.
 
+## Take advantage of multiple prompt content blocks
+
+*From the inbound attachments case, 2026-09-08.*
+
+An ACP prompt is an **array** of content blocks. FalconFox sends exactly one:
+`prompt=[text_block(text)]`. So everything that is not the user's own words is
+concatenated into the same string they typed — the session context, the
+interruption notice, and now `attached: <path>`. All of it reads to the agent
+as though the user said it, and an agent has no way to tell the difference.
+
+The schema already has the parts. `acp.schema` carries `TextContentBlock`,
+`ImageContentBlock`, `ResourceLink`, `EmbeddedResourceContentBlock` and
+`AudioContentBlock`, and the initialize response carries `promptCapabilities`
+saying which of them a backend will accept. Today `_spawn` reads only
+`load_session` off that object and drops the rest.
+
+Two first use cases, in order of value:
+
+- **System instructions as their own block**, rather than a prefix glued to a
+  user message. This is the one that changes behaviour rather than tidiness:
+  right now a session cannot distinguish an instruction from a request.
+- **An attached image as an `ImageContentBlock`**, so the model sees a
+  screenshot directly instead of being handed a path and having to open it.
+
+Deferred because inbound attachments needed only the path to work, and
+capability negotiation is a separate piece of work with its own fallback
+behaviour to get right.
+
 ## Deliberately not planned
 
 **Off-loopback remote access + bearer token.** Listed in the pivot case as the

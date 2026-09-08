@@ -2003,18 +2003,6 @@ class WorkspaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 bot.manager_workspace.joinpath("CLAUDE.md").read_text(), orientation)
 
-    def test_a_skill_from_an_older_version_is_pruned(self):
-        # The directory is the bot's to own: a skill left behind would go on
-        # being read beside the file that replaced it.
-        with tempfile.TemporaryDirectory() as directory:
-            bot = FalconFoxTelegramBot(BotConfig(
-                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
-            stale = Path(directory).joinpath("concierge", ".agents", "skills", "old")
-            stale.mkdir(parents=True)
-            stale.joinpath("SKILL.md").write_text("outdated")
-            bot._prepare_concierge_workspace()
-            self.assertFalse(stale.exists())
-
 
 class VersionTests(unittest.TestCase):
     """Which answer wins when the build-time stamp and git disagree."""

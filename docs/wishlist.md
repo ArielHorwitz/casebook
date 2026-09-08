@@ -129,66 +129,40 @@ whether streaming actually improves on them or just moves them.
 
 ## Let the private-chat session actually diagnose, not just advise
 
-*From the forum rework, 2026-08-30.*
+*From the forum rework, 2026-08-30. Still open after the orientation rewrite,
+2026-09-08.*
 
-The private chat has a session and a skill, and the skill deliberately carries
-only the situation plus the three platform invariants it cannot discover. What
-it has no way to do is **look**. There is no Telegram surface anywhere it can
+The private chat cannot **look**. There is no Telegram surface anywhere it can
 reach: the `falconfox` CLI reports sessions and nothing about chats, so the
-session cannot answer "is my forum working?" — the single most likely question
-in the channel that exists for when the forum is not.
-
-Observed doing real damage: asked exactly that, it invented a probe (spawning
-a session and telling the user to look for its topic), got a false negative
-from an `--ephemeral` session that was never going to produce one, and sent
-the user hunting through a group that was fine. The bot itself already has
-`check_forum`, which reports which of the three conditions failed; the session
+session cannot answer "is my forum working?" - the single most likely question
+in the channel that exists for when the forum is not. The bot already has
+`check_forum`, which reports which of the three conditions failed. The session
 simply cannot call it.
+
+Observed doing real damage: asked exactly that, it invented a probe (spawning a
+session and telling the user to look for its topic), got a false negative from
+an `--ephemeral` session that was never going to produce one, and sent the user
+hunting through a group that was fine.
+
+What the orientation rewrite changed is permission, not capability. It may now
+run commands other than `falconfox`, so it *could* read the bot token out of
+`~/.config/falconfox/telegram.env` and call the Bot API by hand. That is a
+workaround available to a determined agent, not a surface, and nothing points
+it there.
 
 Two shapes, not exclusive:
 
-- **A surface it can call** — a `/check` command, or `falconfox` growing a
+- **A surface it can call** - a `/check` command, or `falconfox` growing a
   Telegram-side report. Small, and it is the part that removes the guessing.
-- **A richer skill** covering what it may run into: common failure modes, what
-  each looks like, what to do about them.
+- **Richer instructions** covering what it may run into: common failure modes,
+  what each looks like, what to do about them.
 
-**Deferred on purpose, and the reason is the second one.** A troubleshooting
-skill is mostly *descriptions of current state*, which is the category that
-goes stale fastest — and a stale skill is not merely useless but actively
-harmful, since the agent finds it and follows it. This rework has already
-rewritten its own ground several times over: the pointer disappeared, the
-forum became learnable, the session cap changed what it counts. Writing the
-playbook now means maintaining a second description of a moving target.
-
-Pick it up when the shape has settled. The surface half could land earlier and
-independently — it adds a capability rather than a description, so it does not
-rot.
-
-## Some way to browse files, or let an agent show them over Telegram
-
-*From the phone, 2026-09-03.*
-
-Reading a file that a session produced or is working on means asking the agent
-to cat it into the chat, which is fine for ten lines and useless for anything
-structured. Downloading it as a Telegram document is worse: it lands wherever
-the phone puts downloads and then needs an app to open it.
-
-Two shapes, and they are not exclusive:
-
-* **A file view in the browser.** The most convenient by far, and the one that
-  collides with "Off-loopback remote access" below: the daemon API is
-  unauthenticated remote code execution held safe only by binding 127.0.0.1,
-  so anything served from it has to sit behind a private network (Tailscale or
-  similar) rather than an exposed port. Read-only first (list, view, inline
-  images, download), scoped to session workspaces, with the bot posting a deep
-  link into each topic so a session and its files are one tap apart.
-* **Sending files through Telegram.** Half done: `falconfox attach <path>` lets
-  a session send a file, which covers the agent-to-user direction. What is
-  still missing is the user asking for one directly, a `/get <path>` command,
-  and the reverse direction of sending a file *to* a session.
-
-Deferred because the browser half is a networking and auth decision before it
-is a feature.
+**Deferred on purpose, and the reason is the second one.** Troubleshooting text
+is mostly *descriptions of current state*, the category that goes stale
+fastest, and stale instructions are not merely useless but actively harmful,
+since the agent finds them and follows them. Pick it up when the shape has
+settled. The surface half can land earlier and independently, since it adds a
+capability rather than a description, so it does not rot.
 
 ## Tell a session when its turn was interrupted
 
@@ -205,28 +179,9 @@ stopped, and roughly how far in. The fix is to say so on the next send, in the
 same hidden-context channel that already re-sends a transcript to a backend
 without native resume.
 
-Deferred because it is a second producer for a channel whose first one, the
-FalconFox session context, is not built yet. Worth doing right after, and not
-before.
-
-## Remove the workspace skill pruning
-
-*From the orientation rewrite, 2026-09-05.*
-
-`_prepare_workspace` deletes any skill directory it finds under a workspace's
-`.agents/skills`. Nothing writes one any more: the manager and private chat
-carry their instructions in `AGENTS.md`, and the packaged skills are gone. The
-prune exists only for workspaces created by an earlier version, where a stale
-skill would go on being read beside the file that replaced it.
-
-There are exactly two such workspaces per deployment, and preparing them
-happens on every start, so one restart of each instance is enough to clean
-every one that will ever exist. After that the code runs forever to fix a
-state that can no longer occur.
-
-Left in deliberately rather than skipped: deleting it in the same change that
-created the mess would have been a bet that every instance had already
-restarted.
+It was deferred behind the FalconFox session context, which needed the same
+channel and landed first (2026-09-07). That reason is spent: the channel
+exists, and this is a second producer for it.
 
 ## Deliberately not planned
 

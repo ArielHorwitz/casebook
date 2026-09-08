@@ -10,7 +10,6 @@ import logging
 import mimetypes
 import os
 import shlex
-import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -594,16 +593,6 @@ class FalconFoxTelegramBot:
         relevant, and these two sessions have exactly one job each to describe.
         """
         root.mkdir(parents=True, exist_ok=True)
-        # Prune what earlier versions installed. The directory is the bot's to
-        # own, so a skill left behind would go on being read beside the file
-        # that replaced it -- the same silent conflict that made renaming one
-        # a bug the first time.
-        skills_root = root.joinpath(".agents", "skills")
-        if skills_root.is_dir():
-            for stale in skills_root.iterdir():
-                if stale.is_dir():
-                    shutil.rmtree(stale, ignore_errors=True)
-                    log.info("pruned stale workspace skill: %s", stale.name)
         root.joinpath("AGENTS.md").write_text(orientation)
         root.joinpath("CLAUDE.md").write_text(orientation)
 

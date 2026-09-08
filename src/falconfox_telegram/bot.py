@@ -1420,15 +1420,20 @@ only channel left, repairing FalconFox from here is what this chat is for.
             await self._clear_chat_session(dest)
             return True
         if command == "/id":
-            # A topic's own session id, in a block to tap and copy. The chat
-            # shows names, and names are ambiguous exactly when it matters:
-            # asking the manager to act on "the falconfox one" is how the
-            # wrong session gets deleted.
+            # A topic's own session id, inline and tap-to-copy. The chat shows
+            # names, and names are ambiguous exactly when it matters: asking
+            # the manager to act on "the falconfox one" is how the wrong
+            # session gets deleted.
             session_id = self._chat_session(dest)
             if session_id is None:
                 await self._say(dest, "No FalconFox session owns this chat.")
                 return True
-            await self._say_block(dest, self._session_label(session_id), session_id)
+            label = self._session_label(session_id)
+            await self._say_html(
+                dest,
+                f"{html.escape(label, quote=False)} <code>"
+                f"{html.escape(session_id, quote=False)}</code>",
+                f"{label} {session_id}")
             return True
         if command in ("/sh", "/jobs", "/tail", "/kill"):
             await self._shell_command(dest, command, text, parts)
@@ -1832,10 +1837,12 @@ only channel left, repairing FalconFox from here is what this chat is for.
         return self._threads.get(dest.thread)
 
     def _session_label(self, session_id: str) -> str:
+        """What to call this session in front of its id. Every label ends
+        ready for one: the id follows on the same line now, not underneath."""
         if session_id == self.manager_session_id:
-            return "This is the session manager."
+            return "The session manager:"
         if session_id == self.concierge_session_id:
-            return "This is the private chat."
+            return "The private chat:"
         return f"Session {self._topic_names.get(session_id) or session_id}:"
 
     async def _status_report(self) -> str:

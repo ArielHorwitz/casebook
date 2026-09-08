@@ -109,6 +109,8 @@ def create_app(
                 await coordinator.stop_session(session_id)
             elif action == "rename":
                 coordinator.rename_session(session_id, body.get("name", ""))
+            elif action == "tag":
+                coordinator.set_tags(session_id, body.get("tags") or [])
             elif action == "name":
                 await coordinator.name_session(session_id)
             elif action == "cancel":

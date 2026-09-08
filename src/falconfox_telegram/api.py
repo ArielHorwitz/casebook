@@ -254,10 +254,35 @@ class TelegramApi:
         return await self.call("getChatMember",
                                {"chat_id": chat_id, "user_id": user_id}) or {}
 
-    async def create_topic(self, chat_id: int, name: str) -> int:
-        result = await self.call("createForumTopic",
-                                 {"chat_id": chat_id, "name": name[:128]})
+    async def create_topic(self, chat_id: int, name: str,
+                           icon: str | None = None) -> int:
+        body = {"chat_id": chat_id, "name": name[:128]}
+        if icon:
+            # Set at creation the icon would otherwise cost an edit -- and an
+            # edit is a service message in the topic, where creation is not.
+            body["icon_custom_emoji_id"] = icon
+        result = await self.call("createForumTopic", body)
         return result["message_thread_id"]
+
+    async def set_topic_icon(self, chat_id: int, thread: int, icon: str) -> None:
+        """Change a topic's icon. An empty string removes it.
+
+        `name` is omitted deliberately: editForumTopic keeps the current title
+        when the field is absent, so this cannot race a rename into reverting
+        it.
+        """
+        await self.call("editForumTopic", {
+            "chat_id": chat_id, "message_thread_id": thread,
+            "icon_custom_emoji_id": icon,
+        })
+
+    async def icon_stickers(self) -> list[dict]:
+        """The custom emoji allowed as topic icons. No arguments, no rights."""
+        return await self.call("getForumTopicIconStickers") or []
+
+    async def delete_message(self, chat_id: int, message_id: int) -> None:
+        await self.call("deleteMessage",
+                        {"chat_id": chat_id, "message_id": message_id})
 
     async def rename_topic(self, chat_id: int, thread: int, name: str) -> None:
         await self.call("editForumTopic", {

@@ -168,13 +168,17 @@ def cmd_list(args) -> None:
         "id": max(8, max(len(item["session_id"]) for item in sessions)),
         "name": min(32, max(4, max(len(item["name"]) for item in sessions))),
         "backend": max(7, max(len(item["backend"]) for item in sessions)),
+        "tags": max(4, max(len(",".join(item.get("tags") or [])) for item in sessions)),
     }
     print(f"{'ID':<{widths['id']}}  {'NAME':<{widths['name']}}  "
-          f"{'STATE':<8}  {'BACKEND':<{widths['backend']}}  PATH")
+          f"{'STATE':<8}  {'BACKEND':<{widths['backend']}}  "
+          f"{'TAGS':<{widths['tags']}}  PATH")
     for item in sessions:
         name = item["name"][:widths["name"]]
+        tags = ",".join(item.get("tags") or [])
         print(f"{item['session_id']:<{widths['id']}}  {name:<{widths['name']}}  "
-              f"{item['state']:<8}  {item['backend']:<{widths['backend']}}  {item['path']}")
+              f"{item['state']:<8}  {item['backend']:<{widths['backend']}}  "
+              f"{tags:<{widths['tags']}}  {item['path']}")
 
 
 def _agent_reply(transcript: list[dict]) -> str:
@@ -217,6 +221,13 @@ def cmd_simple(args) -> None:
 
 def cmd_rename(args) -> None:
     _request("POST", f"/api/sessions/{args.session_id}/rename", {"name": args.name})
+
+
+def cmd_tag(args) -> None:
+    session = _request("POST", f"/api/sessions/{args.session_id}/tag",
+                       {"tags": args.tags})
+    tags = session.get("tags") or []
+    print(" ".join(tags) if tags else "(no tags)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -276,6 +287,12 @@ def build_parser() -> argparse.ArgumentParser:
     rename.add_argument("session_id")
     rename.add_argument("name")
     rename.set_defaults(func=cmd_rename)
+
+    tag = sub.add_parser("tag", help="replace a session's tags (no tags clears them)")
+    tag.add_argument("session_id")
+    tag.add_argument("tags", nargs="*",
+                     help="lowercase, whitespace-free labels; order is kept")
+    tag.set_defaults(func=cmd_tag)
     return parser
 
 

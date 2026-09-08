@@ -272,6 +272,21 @@ def global_hotkeys() -> dict:
     return {**DEFAULT_HOTKEYS, **data.get('hotkeys', {})}
 
 
+def topic_icons() -> dict:
+    """The Telegram client's tag→icon map, from `[telegram.topic_icons]`.
+
+    Read as a narrow slice rather than folded into `Config`, the same way
+    hotkeys and the log level are: it belongs to one client, and the daemon
+    has no opinion about it. There is deliberately no default -- shipping one
+    would put icons on a fresh install that nobody chose, and would quietly
+    make the example vocabulary canonical.
+    """
+    data = _read_toml(global_config_path())
+    icons = data.get("telegram", {}).get("topic_icons", {})
+    return {str(tag).strip().lower(): str(value)
+            for tag, value in icons.items() if str(value).strip()}
+
+
 def log_level() -> str:
     """Log level from global config only (top-level `log_level`).
 

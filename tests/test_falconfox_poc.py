@@ -423,10 +423,22 @@ class FakeTelegram:
     async def get_member(self, chat_id, user_id):
         return dict(self.member_info)
 
-    async def create_topic(self, chat_id, name):
+    async def create_topic(self, chat_id, name, icon=None):
         self.topics = getattr(self, "topics", [])
-        self.topics.append(name)
+        self.topics.append((name, icon) if icon else name)
         return 900 + len(self.topics)
+
+    async def set_topic_icon(self, chat_id, thread, icon):
+        self.icons = getattr(self, "icons", [])
+        self.icons.append((thread, icon))
+
+    async def icon_stickers(self):
+        return [{"emoji": "📁", "custom_emoji_id": "5001"},
+                {"emoji": "❗️", "custom_emoji_id": "5002"}]
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted_messages = getattr(self, "deleted_messages", [])
+        self.deleted_messages.append((chat_id, message_id))
 
     async def rename_topic(self, chat_id, thread, name):
         self.renamed = getattr(self, "renamed", [])
@@ -2002,6 +2014,160 @@ class WorkspaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("FalconFox session manager", orientation)
             self.assertEqual(
                 bot.manager_workspace.joinpath("CLAUDE.md").read_text(), orientation)
+
+
+class SessionTagTests(unittest.IsolatedAsyncioTestCase):
+    """Tags are opaque labels: FalconFox folds them and stores them, and the
+    order is preserved because a client with one slot reads the first one."""
+
+    async def asyncSetUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.coordinator = SessionCoordinator(Path(self.temporary.name))
+        self.coordinator._metadata["work"] = {
+            "session_id": "work", "name": "work", "path": "/tmp",
+            "backend": "echo", "always_allow": True, "ephemeral": False,
+            "hidden": False, "tags": [], "state": "idle", "live": True,
+            "created": "1", "last_active": "1",
+        }
+        self.coordinator._auto_named["work"] = False
+
+    def test_tags_are_folded_but_not_reordered(self):
+        tags = self.coordinator.set_tags("work", ["Urgent", "  Archived  ", "urgent", ""])
+        self.assertEqual(tags, ["urgent", "archived"],
+                         "case folds and duplicates drop, but the order is the payload")
+
+    def test_whitespace_inside_a_tag_is_refused(self):
+        # The map matches by string, so a tag has to be one word or the
+        # lookup silently never fires.
+        with self.assertRaises(FalconFoxError):
+            self.coordinator.set_tags("work", ["needs review"])
+
+    def test_clearing_is_an_empty_list(self):
+        self.coordinator.set_tags("work", ["archived"])
+        self.assertEqual(self.coordinator.set_tags("work", []), [])
+
+    def test_tags_survive_a_daemon_restart(self):
+        self.coordinator.set_tags("work", ["archived", "slow"])
+        stored = tomllib.loads(
+            Path(self.temporary.name, "work", "meta.toml").read_text())
+        self.assertEqual(stored.get("tags"), ["archived", "slow"])
+        restarted = SessionCoordinator(Path(self.temporary.name))
+        restarted.load_persisted()
+        self.assertEqual(restarted._metadata["work"]["tags"], ["archived", "slow"])
+
+    def test_a_session_updated_event_carries_the_tags(self):
+        events = []
+        self.coordinator._emit = lambda event: events.append(event)
+        self.coordinator.set_tags("work", ["archived"])
+        self.assertEqual([event["tags"] for event in events
+                          if event["type"] == "session_updated"], [["archived"]])
+
+
+class TopicIconTests(unittest.IsolatedAsyncioTestCase):
+    """Tag icons on forum topics. Every edit posts a service message, so the
+    tests are mostly about *not* making calls."""
+
+    def _bot(self, directory, icon_map=None):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._icon_map = dict({"archived": "5001", "urgent": "5002"}
+                             if icon_map is None else icon_map)
+        return bot
+
+    async def test_the_first_tag_with_an_icon_wins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            self.assertEqual(bot._icon_for({"tags": ["urgent", "archived"]}), "5002")
+            self.assertEqual(bot._icon_for({"tags": ["archived", "urgent"]}), "5001")
+
+    async def test_an_unmapped_tag_falls_through_to_the_next(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            self.assertEqual(bot._icon_for({"tags": ["golang", "archived"]}), "5001")
+            self.assertEqual(bot._icon_for({"tags": ["golang"]}), "")
+
+    async def test_a_new_topic_carries_its_icon_without_an_edit(self):
+        # Creation takes the icon as an argument; an edit would cost a
+        # service message in a topic that is one second old.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._ensure_topic({"session_id": "work", "name": "work",
+                                     "tags": ["archived"]})
+            self.assertEqual(bot.telegram.topics, [("work", "5001")])
+            self.assertEqual(getattr(bot.telegram, "icons", []), [])
+
+    async def test_an_unchanged_icon_makes_no_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            session = {"session_id": "work", "tags": ["archived"]}
+            bot._bind("work", 42)
+            await bot._apply_icon(session, 42)
+            await bot._apply_icon(session, 42)
+            self.assertEqual(bot.telegram.icons, [(42, "5001")],
+                             "re-applying would stamp a service message per event")
+
+    async def test_dropping_every_mapped_tag_clears_the_icon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("work", 42)
+            await bot._apply_icon({"session_id": "work", "tags": ["archived"]}, 42)
+            await bot._apply_icon({"session_id": "work", "tags": []}, 42)
+            self.assertEqual(bot.telegram.icons, [(42, "5001"), (42, "")])
+
+    async def test_with_no_map_configured_nothing_is_ever_called(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory, icon_map={})
+            bot._bind("work", 42)
+            await bot._apply_icon({"session_id": "work", "tags": ["archived"]}, 42)
+            self.assertEqual(getattr(bot.telegram, "icons", []), [])
+
+    async def test_the_applied_icon_survives_a_restart(self):
+        # The Bot API cannot report a topic's icon, so the only alternative to
+        # remembering is re-applying blindly -- a service message per topic
+        # on every start.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("work", 42)
+            await bot._apply_icon({"session_id": "work", "tags": ["archived"]}, 42)
+            restarted = self._bot(directory)
+            restarted._load_topics()
+            self.assertEqual(restarted._topics, {"work": 42})
+            await restarted._apply_icon({"session_id": "work", "tags": ["archived"]}, 42)
+            self.assertEqual(getattr(restarted.telegram, "icons", []), [])
+
+    async def test_the_old_flat_topic_file_still_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "topics.json").write_text(json.dumps({"work": 42}))
+            bot = self._bot(directory)
+            bot._load_topics()
+            self.assertEqual(bot._topics, {"work": 42},
+                             "dropping the old shape would make a second topic each")
+            self.assertEqual(bot._topic_icons, {})
+
+    async def test_the_map_is_configured_in_emoji(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory, icon_map={})
+            with patch.object(config, "topic_icons",
+                              return_value={"archived": "📁", "raw": "999",
+                                            "nope": "🦖"}):
+                await bot._load_icon_map()
+            self.assertEqual(bot._icon_map, {"archived": "5001", "raw": "999"},
+                             "an emoji outside the allowed set is dropped, not sent")
+
+    async def test_the_icon_notice_is_swept_but_a_rename_notice_is_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_id": 7, "message_thread_id": 42,
+                "forum_topic_edited": {"icon_custom_emoji_id": "5001"}}})
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_id": 8, "message_thread_id": 42,
+                "forum_topic_edited": {"name": "renamed"}}})
+            self.assertEqual(bot.telegram.deleted_messages, [(-1001, 7)])
 
 
 class VersionTests(unittest.TestCase):

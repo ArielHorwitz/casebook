@@ -30,6 +30,30 @@ def _now_iso() -> str:
     return datetime.datetime.now().isoformat()
 
 
+def _normalize_tags(tags: list) -> list[str]:
+    """Fold a tag list into the form clients can match on.
+
+    Tags are opaque to FalconFox: it stores them and shows them, and what
+    they mean is between the user and whoever reads them. The only rules are
+    the mechanical ones a lookup needs -- lowercase, and no whitespace, so a
+    tag is one word that matches by string. Order is preserved and meaningful,
+    since a client mapping tags to a single slot (a topic icon) takes the
+    first one it knows.
+    """
+    seen: list[str] = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            raise FalconFoxError(f"tags must be strings, got {type(tag).__name__}")
+        folded = tag.strip().lower()
+        if not folded:
+            continue
+        if any(character.isspace() for character in folded):
+            raise FalconFoxError(f"tags must not contain whitespace: {tag!r}")
+        if folded not in seen:
+            seen.append(folded)
+    return seen
+
+
 def _clean_name(reply: str) -> str:
     first_line = reply.strip().splitlines()[0] if reply.strip() else ""
     return first_line.strip().strip("\"'").strip()[:80]
@@ -90,6 +114,7 @@ class SessionCoordinator:
                 # plumbing after a daemon restart, or it reappears in every
                 # listing and starts competing as if it were the user's.
                 "hidden": bool(meta.get("hidden")),
+                "tags": _normalize_tags(meta.get("tags") or []),
                 "state": "stored",
                 "live": False,
                 "created": meta.get("created"),
@@ -217,6 +242,7 @@ class SessionCoordinator:
             "named": not self._auto_named.get(session_id, True),
             "acp_session_id": self._acp_ids.get(session_id),
             "hidden": bool(meta.get("hidden")),
+            "tags": meta.get("tags") or [],
             "created": meta.get("created"),
             "last_active": meta.get("last_active") or _now_iso(),
         })
@@ -312,6 +338,7 @@ class SessionCoordinator:
                 "path": str(working_path), "backend": backend.name,
                 "always_allow": True, "ephemeral": bool(ephemeral),
                 "hidden": hidden,
+                "tags": [],
                 "state": "stored", "live": False, "created": now, "last_active": now,
             }
             self._persist_meta(session_id)
@@ -337,6 +364,7 @@ class SessionCoordinator:
             "always_allow": True,
             "ephemeral": bool(ephemeral),
             "hidden": hidden,
+            "tags": [],
             "state": "starting",
             "live": True,
             "created": now,
@@ -666,6 +694,20 @@ class SessionCoordinator:
         self._auto_named[session_id] = False
         self._persist_meta(session_id)
         self._emit({"type": "session_updated", **meta})
+
+    def set_tags(self, session_id: str, tags: list) -> list[str]:
+        """Replace a session's tags, in the order given.
+
+        Replace rather than add/remove, because the order is the payload as
+        much as the membership is: a client with one slot to fill reads the
+        first tag it recognises, so "which comes first" has to be sayable in
+        one call. An empty list clears them.
+        """
+        meta = self._require(session_id)
+        meta["tags"] = _normalize_tags(tags)
+        self._persist_meta(session_id)
+        self._emit({"type": "session_updated", **meta})
+        return meta["tags"]
 
     # --- transcript utilities retained from the existing daemon --------
 

@@ -21,6 +21,7 @@ from websockets.exceptions import ConnectionClosed
 # Diagnostic machinery, not daemon protocol: the 2026-08-25 keepalive stalls
 # could not even be attributed to a side, because neither process recorded its
 # own freezes. Both run the same watchdog; sharing it crosses no boundary.
+from falconfox import config as falconfox_config
 from falconfox.watchdog import StallWatchdog
 
 from .api import ApiError, DaemonApi, TelegramApi
@@ -276,6 +277,15 @@ class FalconFoxTelegramBot:
         # Last title mirrored onto each topic, so the steady stream of
         # session_updated events only acts on a real change.
         self._topic_names: dict[str, str] = {}
+        # Last icon applied to each topic ("" for none). Remembered rather
+        # than read back, because the Bot API cannot report a topic's current
+        # icon at all -- there is no getForumTopic. Without this the bot
+        # would re-apply on every startup, and every re-application is a
+        # service message in the topic.
+        self._topic_icons: dict[str, str] = {}
+        # tag -> custom emoji id, resolved once at startup from the user's
+        # `[telegram.topic_icons]` map. Empty when they configured none.
+        self._icon_map: dict[str, str] = {}
         self._turn_dest: dict[str, Dest] = {}
         self._activity_tasks: dict[str, asyncio.Task] = {}
         self._activity_state: dict[str, str] = {}
@@ -371,6 +381,10 @@ class FalconFoxTelegramBot:
             log.warning("turn reconciliation failed", exc_info=True)
         if self.forum_chat_id is not None:
             await self._ensure_manager()
+        try:
+            await self._load_icon_map()
+        except Exception:
+            log.warning("could not load the topic icon map", exc_info=True)
         try:
             await self._reconcile_topics()
         except Exception:
@@ -627,6 +641,17 @@ forum stays under the live-session limit. `falconfox delete <id>` discards the
 session and removes its topic. Stopping a session that was never used deletes
 it instead, since there is nothing to keep.
 
+**Tags.** `falconfox tag <id> <tags...>` labels a session, and `falconfox
+list` shows the labels. Tags mean nothing to FalconFox: they are the user's
+own vocabulary, so take them as given rather than proposing a scheme, and do
+not act on one unless the user has told you what it means to them.
+
+Two mechanics matter. The call **replaces** the whole list, so carry the
+existing tags forward when adding one, and `falconfox tag <id>` with no tags
+clears them. And the **order is meaningful**: the user may have configured a
+topic icon per tag, and the first tag with an icon is the one shown, so
+preserve the order you were given and do not reorder tags on your own.
+
 **Be certain of the target before deleting.** There is no undo, and messages
 here may have been transcribed from speech, so a reference you half-recognise
 is worth reading back first; an unambiguous one is not. The daemon refuses to
@@ -816,20 +841,55 @@ only channel left, repairing FalconFox from here is what this chat is for.
             log.warning("could not persist the learned forum", exc_info=True)
         log.info("forum learned: %s", chat_id)
 
+    async def _sweep_icon_notice(self, message: dict) -> None:
+        """Delete the "changed the topic icon" notice the bot just caused.
+
+        Setting an icon posts a service message into the topic, which would
+        make a tag change cost a line of chat -- the clutter the two-message
+        turn was designed to avoid. The bot cannot suppress it, so it deletes
+        it on the way back, best-effort: without `can_delete_messages` the
+        call simply fails and the notice stays.
+
+        Narrowly icon-only edits. A rename carries `name` in the same event,
+        and that notice is left alone: it is not what this feature added.
+        """
+        edited = message.get("forum_topic_edited")
+        if not isinstance(edited, dict):
+            return
+        if "icon_custom_emoji_id" not in edited or "name" in edited:
+            return
+        chat_id = (message.get("chat") or {}).get("id")
+        message_id = message.get("message_id")
+        if chat_id is None or message_id is None:
+            return
+        try:
+            await self.telegram.delete_message(chat_id, message_id)
+        except ApiError:
+            log.debug("could not delete an icon-change notice in %s",
+                      chat_id, exc_info=True)
+
     def _load_topics(self) -> None:
         try:
             raw = json.loads(self._topics_file.read_text())
         except (OSError, ValueError):
             raw = {}
-        self._topics = {k: int(v) for k, v in raw.items() if isinstance(v, int)}
+        # The file was once a flat session→thread map, before it had to carry
+        # the applied icon too. Read either shape: a version that dropped the
+        # old one would make a second topic for every existing session.
+        topics = raw.get("topics", raw) if isinstance(raw, dict) else {}
+        icons = raw.get("icons", {}) if isinstance(raw, dict) else {}
+        self._topics = {k: int(v) for k, v in topics.items() if isinstance(v, int)}
         self._threads = {v: k for k, v in self._topics.items()}
+        self._topic_icons = {k: str(v) for k, v in icons.items()
+                             if k in self._topics}
 
     def _persist_topics(self) -> None:
         """Write the session→topic map atomically. Never fatal."""
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
             temporary = self._topics_file.with_suffix(".tmp")
-            temporary.write_text(json.dumps(self._topics))
+            temporary.write_text(json.dumps(
+                {"topics": self._topics, "icons": self._topic_icons}))
             temporary.replace(self._topics_file)
         except OSError:
             log.warning("could not persist the topic map", exc_info=True)
@@ -843,8 +903,77 @@ only channel left, repairing FalconFox from here is what this chat is for.
         thread = self._topics.pop(session_id, None)
         if thread is not None:
             self._threads.pop(thread, None)
+            self._topic_icons.pop(session_id, None)
             self._persist_topics()
         return thread
+
+    async def _load_icon_map(self) -> None:
+        """Resolve the configured tag→icon map into custom emoji ids.
+
+        The map is written in emoji (`archived = "📁"`) because nobody
+        maintains nineteen-digit ids by hand, and `getForumTopicIconStickers`
+        turns one into the other for free -- no arguments, no admin rights.
+        A raw id is passed through, for anything the endpoint does not list.
+
+        Failure is not fatal: the forum works without icons, so a bad entry
+        drops out with a warning rather than taking the client down.
+        """
+        configured = falconfox_config.topic_icons()
+        if not configured:
+            return
+        try:
+            stickers = await self.telegram.icon_stickers()
+        except ApiError:
+            log.warning("could not read the topic icon set; icons are off",
+                        exc_info=True)
+            return
+        by_emoji = {item.get("emoji"): item.get("custom_emoji_id")
+                    for item in stickers if item.get("custom_emoji_id")}
+        for tag, value in configured.items():
+            if value.isdigit():
+                self._icon_map[tag] = value
+            elif value in by_emoji:
+                self._icon_map[tag] = by_emoji[value]
+            else:
+                log.warning("topic icon for tag %r is not an allowed forum "
+                            "icon: %r", tag, value)
+        log.info("topic icons configured for tags: %s", sorted(self._icon_map))
+
+    def _icon_for(self, session: dict) -> str:
+        """The icon a session's tags ask for, or "" for none.
+
+        First match wins, in the order the tags were set: one topic has one
+        icon slot, and the user's ordering is how they say which tag matters
+        most. A tag with no mapping falls through to the next one, so tags
+        stay useful whether or not they are drawn.
+        """
+        for tag in session.get("tags") or []:
+            icon = self._icon_map.get(tag)
+            if icon:
+                return icon
+        return ""
+
+    async def _apply_icon(self, session: dict, thread: int) -> None:
+        """Put the session's tag icon on its topic, if it is not there already.
+
+        Every edit posts a service message into the topic, so this acts only
+        on a real change -- and the bot deletes the echo when it arrives.
+        """
+        if not self._icon_map:
+            return
+        session_id = session.get("session_id")
+        icon = self._icon_for(session)
+        if self._topic_icons.get(session_id, "") == icon:
+            return
+        try:
+            await self.telegram.set_topic_icon(self.forum_chat_id, thread, icon)
+        except ApiError:
+            log.warning("could not set the icon on topic %s", thread, exc_info=True)
+            return
+        self._topic_icons[session_id] = icon
+        self._persist_topics()
+        log.info("topic icon set: session=%s thread=%s icon=%s",
+                 session_id, thread, icon or "(none)")
 
     async def _ensure_topic(self, session: dict) -> int | None:
         """Give a session a topic, creating one if it has none.
@@ -863,8 +992,9 @@ only channel left, repairing FalconFox from here is what this chat is for.
         if existing is not None:
             return existing
         title = session.get("name") or session_id
+        icon = self._icon_for(session)
         try:
-            thread = await self.telegram.create_topic(self.forum_chat_id, title)
+            thread = await self.telegram.create_topic(self.forum_chat_id, title, icon)
         except ApiError as error:
             log.warning("could not create a topic for %s", session_id, exc_info=True)
             # Silent here means a session spawns cleanly and simply never
@@ -877,6 +1007,8 @@ only channel left, repairing FalconFox from here is what this chat is for.
             return None
         self._bind(session_id, thread)
         self._topic_names[session_id] = title
+        self._topic_icons[session_id] = icon
+        self._persist_topics()
         log.info("topic created: session=%s thread=%s name=%s", session_id, thread, title)
         return thread
 
@@ -896,6 +1028,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 # (429 retry-after observed), so a burst of creations on a
                 # first run must not be fired all at once.
                 await self._ensure_topic(item)
+            else:
+                # Tags can have moved while the bot was down. The remembered
+                # icon makes this a no-op in the ordinary case, so a restart
+                # does not stamp a service message on every topic.
+                await self._apply_icon(item, self._topics[item["session_id"]])
 
     async def _poll_telegram(self) -> None:
         offset = None
@@ -1039,6 +1176,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
                    for key in message):
                 # Topic service messages are the bot's own lifecycle calls
                 # echoing back; answering them would spam every topic it makes.
+                await self._sweep_icon_notice(message)
                 return
             await self._say(dest, "Text messages only in this PoC.")
             return
@@ -1813,6 +1951,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 self._topic_names[session_id] = name
             except ApiError:
                 log.warning("could not retitle topic %s", thread, exc_info=True)
+        await self._apply_icon(session, thread)
 
     async def _finish_turn(self, session_id: str, event: dict | None) -> None:
         """Close out a turn: deliver the remainder, stop the indicator, account

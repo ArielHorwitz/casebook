@@ -49,24 +49,6 @@ eve of a stability soak, since it adds a code path to the hot send path.
 Workaround until then: do not delete a session's topic by hand. Delete the
 *session* (`falconfox delete`), which removes its topic as a consequence.
 
-## A rebuilt VPS loses the Python 3.12 shim
-
-*From the first phone session, 2026-08-24.*
-
-On Ubuntu 22.04 the bare word `python3` is **3.10**, which cannot import
-`tomllib`. Any tool documented as "run it with python3" therefore fails on a
-stock host — the casebook skill's CLI did exactly that.
-
-The fix in place is a host-local symlink, `~/.local/bin/python3 ->
-/usr/bin/python3.12`, made by hand. It carries **no commit**, so it is not part
-of any deployment: a rebuilt or second host silently reverts to 3.10 and the
-same failure returns. `setup.sh` does not create it, deliberately — but the
-bootstrap checklist has to, or this recurs.
-
-falconfox itself is immune, since uv provisions its own interpreter and the
-daemon, bot and deploy scripts all use absolute venv paths. The blast radius is
-tools invoked as plain `python3` from inside a session.
-
 ## Known-broken by design
 
 **The web UI does not work against the flat session model.** Flattening removed

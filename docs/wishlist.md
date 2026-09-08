@@ -61,8 +61,47 @@ Notes for whoever builds it: queuing belongs in the bot (the daemon
 deliberately refuses mid-turn prompts and should keep doing so); a queued
 message needs to survive a bot restart (the persisted turn map in
 `turns.json` is the established pattern); and the buttons need the bot's
-first callback-query handling — the same machinery a future "cancel turn"
-button on the progress message would use.
+first callback-query handling — the same machinery the stop-button entry
+below needs, which is also where the **Interrupt** half is written up.
+
+## Stop a running turn from the chat
+
+*From the phone, 2026-09-08.*
+
+There is no way to cancel a turn from Telegram. A session sent down a wrong
+path runs to completion while you watch it, and the only lever is the CLI or
+the web UI, neither of which is on a phone. Wanted: a **Stop button on the
+progress message**, so the surface that says a turn is running is also the one
+that ends it.
+
+The capability exists everywhere except the chat. The daemon has
+`coordinator.cancel`, the HTTP API exposes it as `POST
+/sessions/{id}/cancel`, and the web UI already binds it to a hotkey
+(`cancel_turn`). The bot's rendering of the *result* is built too: a turn
+that stops with `cancelled` stamps "✖️ Turn cancelled" on the progress
+message and skips the empty-reply warning.
+
+What is missing is the button and the wire to it:
+
+- `DaemonClient` (`api.py`) has no `cancel` method, though every other action
+  it needs is already there.
+- The bot has **no callback-query handling at all** - no inline keyboard is
+  sent anywhere, and `TelegramClient` has no `answerCallbackQuery`. Note that
+  `getUpdates` subscribes to `["message", "my_chat_member"]`, so
+  `callback_query` updates are *not delivered* until that list grows; a button
+  added without it does nothing, silently.
+
+The same first callback handling is what the queue-or-interrupt entry above
+needs, and its **Interrupt** half is this feature reached from the other
+message. Whichever lands first should build the machinery for both.
+
+One hazard worth designing for: the button outlives the turn it belongs to.
+The progress message is left standing after the turn ends (deliberately - the
+chain of work stays in the chat), and `progress_msg` survives a bot restart in
+`turns.json`. So callback data keyed on the session id alone would let a press
+on yesterday's message kill *today's* turn. It needs turn identity, and the
+button is best removed or disarmed at finalization, where the note is already
+being stamped.
 
 ## Choose the model when spawning a session
 

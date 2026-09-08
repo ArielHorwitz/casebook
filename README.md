@@ -102,6 +102,12 @@ by the manager agent. There is no focus pointer and no `/switch`: a topic *is*
 the address, so there is nothing left to switch. During turns the bot refreshes Telegram's
 typing indicator, suppresses tool calls, and sends the final reply as one message.
 
+A message written while a turn is running is **queued**, not refused: it goes
+out when the turn ends, and several of them are joined into one prompt. `/stop`
+ends the running turn, which is what makes the queue drain; `/unqueue` drops
+what is queued and leaves the turn alone; `/fullstop` does both, since doing
+them separately in that order races the flush.
+
 Voice messages and interactive permissions are intentionally deferred. The PoC
 uses always-allow sessions; a permission request with no choices is denied
 immediately instead of hanging.

@@ -25,7 +25,7 @@ from falconfox.engine.session import AgentSession
 from falconfox.storage import SessionStore
 from falconfox.watchdog import StallWatchdog
 from falconfox_telegram.api import ApiError, _json_request
-from falconfox_telegram.bot import (BUSY_TURN, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
+from falconfox_telegram.bot import (QUEUED_FIRST, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
 from falconfox_telegram.bot import COMMANDS, PHOTO_LIMIT_BYTES, _upload_kind
@@ -827,7 +827,7 @@ class TelegramEventTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent, [], "nothing may reach the daemon mid-turn")
             self.assertEqual(bot._reply_parts["session"], ["half a reply so far"],
                              "the in-flight reply must survive")
-            self.assertEqual(bot.telegram.messages, [(20, BUSY_TURN)])
+            self.assertEqual(bot.telegram.messages, [(20, QUEUED_FIRST)])
 
             # The original turn still finishes and delivers.
             await self._idle(bot)
@@ -2168,6 +2168,144 @@ class TopicIconTests(unittest.IsolatedAsyncioTestCase):
                 "chat": {"id": -1001}, "message_id": 8, "message_thread_id": 42,
                 "forum_topic_edited": {"name": "renamed"}}})
             self.assertEqual(bot.telegram.deleted_messages, [(-1001, 7)])
+
+
+class QueueAndStopTests(unittest.IsolatedAsyncioTestCase):
+    """A mid-turn message is kept, and a turn can be ended from the chat.
+
+    The rule under test throughout: a queue drains when a turn *ends*. /stop
+    flushes nothing itself, it only ends the turn.
+    """
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._bind("session", 20)
+        bot._turn_dest["session"] = Dest(-1001, 20)
+        bot._reply_parts["session"] = []
+        bot._turn_working.add("session")
+        self.sent = []
+        self.cancelled = []
+
+        class FakeWebSocket:
+            async def send(inner, payload):
+                self.sent.append(json.loads(payload))
+
+        class FakeDaemon:
+            async def cancel(inner, session_id):
+                self.cancelled.append(session_id)
+
+        bot._ws = FakeWebSocket()
+        bot.daemon = FakeDaemon()
+        return bot
+
+    def _update(self, text, thread=20, message_id=1):
+        return {"message": {"chat": {"id": -1001}, "text": text,
+                            "message_thread_id": thread, "message_id": message_id,
+                            "from": {"id": 7}}}
+
+    async def _idle(self, bot):
+        await bot._handle_event({"type": "agent_state", "session_id": "session",
+                                 "state": "idle"})
+
+    async def test_a_mid_turn_message_is_kept_and_acknowledged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("more context", message_id=11))
+            self.assertEqual(self.sent, [], "nothing reaches the daemon mid-turn")
+            self.assertEqual([item["text"] for item in bot._queues["session"]],
+                             ["more context"])
+            self.assertEqual(bot.telegram.messages, [(20, QUEUED_FIRST)])
+            self.assertEqual(bot.telegram.message_replies, [11],
+                             "the acknowledgement threads to the message it kept")
+
+    async def test_several_messages_become_one_prompt_in_order(self):
+        # Consecutive messages on a phone are one thought split by the send
+        # button, so they are joined rather than run as separate turns.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("first", message_id=11))
+            await bot._handle_update(self._update("second", message_id=12))
+            self.assertIn("(2)", bot.telegram.messages[1][1])
+            await self._idle(bot)
+            self.assertEqual([item["text"] for item in self.sent],
+                             ["first\n\nsecond"])
+
+    async def test_the_queue_drains_when_the_turn_ends(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("after you", message_id=11))
+            self.assertEqual(self.sent, [])
+            await self._idle(bot)
+            self.assertEqual([item["text"] for item in self.sent], ["after you"])
+            self.assertNotIn("session", bot._queues)
+            self.assertEqual(bot._prompt_msg.get("session"), 11,
+                             "the new turn answers the last queued message")
+
+    async def test_stop_ends_the_turn_and_does_not_flush_by_itself(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("after you", message_id=11))
+            await bot._handle_update(self._update("/stop", message_id=12))
+            self.assertEqual(self.cancelled, ["session"])
+            self.assertEqual(self.sent, [],
+                             "the flush waits for the turn to actually end")
+            self.assertIn("session", bot._queues)
+            # The daemon ends the turn in its own time; that is what flushes.
+            await self._idle(bot)
+            self.assertEqual([item["text"] for item in self.sent], ["after you"])
+
+    async def test_unqueue_drops_the_queue_and_leaves_the_turn_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("never mind", message_id=11))
+            await bot._handle_update(self._update("/unqueue", message_id=12))
+            self.assertEqual(self.cancelled, [])
+            self.assertNotIn("session", bot._queues)
+            self.assertIn("session", bot._turn_dest)
+            await self._idle(bot)
+            self.assertEqual(self.sent, [])
+
+    async def test_fullstop_does_both_in_one_call(self):
+        # Its whole reason to exist: /stop then /unqueue races the flush.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("never mind", message_id=11))
+            await bot._handle_update(self._update("/fullstop", message_id=12))
+            self.assertEqual(self.cancelled, ["session"])
+            await self._idle(bot)
+            self.assertEqual(self.sent, [], "nothing queued survives a /fullstop")
+
+    async def test_stop_says_so_when_no_turn_is_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._turn_dest.pop("session")
+            await bot._handle_update(self._update("/stop", message_id=12))
+            self.assertEqual(self.cancelled, [],
+                             "claiming to stop nothing teaches distrust")
+            self.assertIn("No turn is running", bot.telegram.messages[0][1])
+
+    async def test_unqueue_says_so_when_nothing_is_queued(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("/unqueue", message_id=12))
+            self.assertIn("Nothing was queued", bot.telegram.messages[0][1])
+
+    async def test_the_queue_survives_a_bot_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("after you", message_id=11))
+            record = json.loads(Path(directory, "turns.json").read_text())["session"]
+            self.assertEqual([item["text"] for item in record["queued"]],
+                             ["after you"])
+            restarted = self._bot(directory)
+            restarted._turn_dest.clear()
+            restarted._adopt_turn("session", record)
+            self.assertEqual([item["text"] for item in restarted._queues["session"]],
+                             ["after you"])
 
 
 class VersionTests(unittest.TestCase):

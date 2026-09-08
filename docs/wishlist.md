@@ -35,61 +35,6 @@ parts were built.
 Wanted, and not a blocker. Text first was the right order; voice is now its own
 effort rather than an unfinished corner of the pivot.
 
-## Queue a mid-turn message, and stop a turn with /stop
-
-*From the phone, 2026-08-25. Design settled 2026-09-08, merging what was
-filed as two entries.*
-
-*Less pressing since the forum rework:* with a topic per session you can go
-work in another topic while one is busy, so a refusal no longer blocks you
-from doing anything at all. It still loses the words you typed.
-
-Today a message sent while a turn is running is refused with "send it again
-once the reply arrives" - itself a fix over the previous behaviour, which
-silently destroyed both the message and the in-flight reply. And there is no
-way to end a turn from the chat at all: a session sent down a wrong path runs
-to completion while you watch it, since the only levers are the CLI and the
-web UI, neither of which is on a phone.
-
-The design, settled:
-
-- A mid-turn message is **kept, not bounced**, and the bot answers to say it
-  is queued. Several queued messages **concatenate into one prompt**,
-  separated by blank lines: on a phone, consecutive messages are usually one
-  thought split by the send button, not separate instructions.
-- **A queue drains when a turn ends** - always, whether the turn finished by
-  itself or was stopped. That is the only rule, and it is also forced:
-  cancellation is not instant and the daemon still refuses a mid-turn prompt,
-  so the flush has to hang off `turn_ended` either way.
-- `/stop` cancels the running turn. It flushes nothing itself; the turn
-  ending is what flushes.
-- `/unqueue` drops the queue.
-- `/fullstop` is both, in the order that works. Without it the pair races:
-  unqueue-then-stop is fine, stop-then-unqueue is a coin flip, and that is
-  not something to expect a user to reason about mid-turn.
-
-**A Stop button on the progress message was considered and rejected.** The
-progress message is created lazily on first narration, so a turn that
-produces nothing has no message and therefore no button - which is exactly
-the hung turn worth killing. A command is always available, and it needs none
-of the bot's absent callback-query machinery.
-
-Notes for whoever builds it:
-
-- Cancel exists everywhere except the chat: `coordinator.cancel`, `POST
-  /sessions/{id}/cancel`, and the web UI's `cancel_turn` hotkey. `DaemonApi`
-  has no `cancel` method, and that wire is the whole of the daemon side.
-- The *result* is already rendered: a turn that stops with `cancelled` stamps
-  "✖️ Turn cancelled" on the progress message and skips the empty-reply
-  warning.
-- The queue belongs in the bot - the daemon deliberately refuses mid-turn
-  prompts and should keep doing so - and must survive a bot restart, in
-  `turns.json` beside the turn map. Do not confuse it with the daemon's own
-  `_queued`, which is sessions waiting for a live slot.
-- The "queued" acknowledgement is a reply for now, which is a message the
-  chat did not have before. A **reaction** on the queued message would cost
-  none, so switch to it when the reaction entry below lands.
-
 ## Choose the model when spawning a session
 
 *From the phone, 2026-08-25.*
@@ -129,9 +74,9 @@ marker half is still available and independent of it. The case it came from
 shipped enough turn feedback that this is now a refinement rather than a gap,
 which is exactly why it is here and not in that case.
 
-There is a second taker now: the queue entry above acknowledges a queued
-message with a reply, and a reaction would say the same thing for no message
-at all.
+There is a second taker now, shipped 2026-09-08: a message queued mid-turn is
+acknowledged with a reply, which is a message the chat did not have before. A
+reaction on the queued message would say the same thing for none.
 
 ## Make use of Telegram message streaming
 

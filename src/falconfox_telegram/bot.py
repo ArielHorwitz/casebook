@@ -35,13 +35,21 @@ log = logging.getLogger("falconfox.telegram")
 # -updating from inside a session makes restarts routine, so they get announced.
 DAEMON_DOWN = "\u26a0\ufe0f Daemon connection lost \u2014 reconnecting."
 DAEMON_UP = "\u2705 FalconFox is up"
-BUSY_TURN = (
-    "Still working on the previous message, so this one was not sent — send it "
-    "again once the reply arrives."
+# Queued rather than refused. The first one explains itself, because the two
+# ways out are not discoverable; the rest just count, because the whole point
+# is to add less to the chat than retyping would.
+QUEUED_FIRST = (
+    "📥 Queued — it goes out when this turn ends.\n"
+    "/stop ends the turn now · /unqueue drops it · /fullstop does both."
 )
+QUEUED_MORE = "📥 Queued ({count}) — they go out together when this turn ends."
 # The recurring silent failure: a turn ends, nothing was ever delivered, and no
 # layer had an error to report. Now the moment it happens, the chat hears it.
 SILENT_TURN = "⚠️ The turn ended without delivering a reply ({detail})."
+# A queue only outlives the bot if its turn does, so this is the one case
+# where queued words are genuinely lost: the session they were for is gone.
+LOST_QUEUE = ("⚠️ {count} queued message(s) went with it, and were not sent. "
+              "Their text is still above, in the messages you typed.")
 # Reconciliation messages: what a fresh connection says about turns it found in
 # the persisted map. The old behaviour -- declaring the reply gone the moment
 # the connection dropped -- was usually false: the daemon keeps every chunk in
@@ -192,6 +200,9 @@ COMMANDS = (
     ("/new [path] [name]", "spawn a session, defaulting to the default path"),
     ("/home [name]", "spawn a session in the default path"),
     ("/name <name>", "rename this topic's session"),
+    ("/stop", "end the running turn; anything queued goes out after it"),
+    ("/unqueue", "drop what is queued, leaving the turn running"),
+    ("/fullstop", "drop what is queued and end the turn"),
     ("/sh <command>", "run a command on the host, detached in tmux"),
     ("/jobs", "shell jobs this bot has started"),
     ("/tail <id>", "re-read a job's output"),
@@ -225,9 +236,10 @@ ACTION_REFRESH_SECONDS = 4
 # produced the run-on garbage this replaces -- narration glued together with
 # its referents (the tool calls) invisible.
 #
-# The progress message is plain text, created lazily (a turn with nothing to
-# narrate gets none), updated from the activity loop so a hung edit can never
-# stall the event pipeline, and capped by trimming its oldest lines.
+# The progress message is plain text, created by _forward at the very start of
+# the turn (so a turn that narrates nothing still has one), updated from the
+# activity loop so a hung edit can never stall the event pipeline, and capped
+# by trimming its oldest lines.
 PROGRESS_HEADER = "🛠 Working…"
 PROGRESS_LIMIT = 3500
 # Thought blocks join the progress message (user decision, 2026-08-25: the
@@ -287,6 +299,10 @@ class FalconFoxTelegramBot:
         # `[telegram.topic_icons]` map. Empty when they configured none.
         self._icon_map: dict[str, str] = {}
         self._turn_dest: dict[str, Dest] = {}
+        # Messages typed while a turn was running, per session, each with the
+        # message id that carried it. Held here rather than in the daemon,
+        # which refuses a mid-turn prompt on purpose and should keep doing so.
+        self._queues: dict[str, list[dict]] = {}
         self._activity_tasks: dict[str, asyncio.Task] = {}
         self._activity_state: dict[str, str] = {}
         self._turn_working: set[str] = set()
@@ -480,6 +496,7 @@ class FalconFoxTelegramBot:
                 "prompt_msg": self._prompt_msg.get(session_id),
                 "progress_msg": self._progress_msg.get(session_id),
                 "progress": self._progress_lines.get(session_id, []),
+                "queued": self._queues.get(session_id, []),
                 # Wall time, because the reader is a different process with a
                 # different monotonic clock.
                 "started": now_wall - (now_mono - started) if started else now_wall,
@@ -525,11 +542,22 @@ class FalconFoxTelegramBot:
             if state is None:
                 log.warning("persisted turn lost: session=%s no longer exists", session_id)
                 await self._say(dest, LOST_TURN.format(session_id=session_id))
+                if record.get("queued"):
+                    # The turn's own reply is gone with the session; say the
+                    # queued messages went with it rather than dropping them
+                    # silently, since the user is still expecting them to send.
+                    await self._say(dest, LOST_QUEUE.format(
+                        count=len(record["queued"])))
             elif state in ("working", "starting"):
                 self._adopt_turn(session_id, record)
                 await self._set_activity(session_id, "working")
             else:
                 await self._deliver_recovered_turn(session_id, record)
+                # The turn ended while the bot was away, so nothing will call
+                # the flush from _finish_turn. This is that moment, late.
+                if record.get("queued"):
+                    self._queues[session_id] = list(record["queued"])
+                    await self._flush_queue(session_id, dest)
         self._persist_turns()
 
     def _adopt_turn(self, session_id: str, record: dict) -> None:
@@ -548,6 +576,8 @@ class FalconFoxTelegramBot:
             self._progress_msg[session_id] = record["progress_msg"]
         if record.get("progress"):
             self._progress_lines[session_id] = list(record["progress"])
+        if record.get("queued"):
+            self._queues[session_id] = list(record["queued"])
         # Seed the quiet clock: the turn has a past, but this process has no
         # event history for it. Without this, adoption instantly fired a
         # spurious "quiet for 10 min" warning (observed on the first live
@@ -1289,7 +1319,52 @@ only channel left, repairing FalconFox from here is what this chat is for.
             # event, so it happens whoever renamed the session.
             await self._say(dest, f"Renamed session to {' '.join(parts[1:])}.")
             return True
+        if command in ("/stop", "/unqueue", "/fullstop"):
+            await self._stop_command(dest, command)
+            return True
         return False
+
+    async def _stop_command(self, dest: Dest, command: str) -> None:
+        """End the turn, drop the queue, or both.
+
+        `/fullstop` exists because the pair races otherwise: after a `/stop`
+        the flush is already coming, so unqueue-then-stop works while
+        stop-then-unqueue is a coin flip -- not something to reason about
+        mid-turn, so it gets one command that cannot be ordered wrongly.
+        """
+        session_id = self._chat_session(dest)
+        if session_id is None:
+            await self._say(dest, "No FalconFox session speaks in this chat.")
+            return
+        dropped = (self._drop_queue(session_id)
+                   if command in ("/unqueue", "/fullstop") else 0)
+        if command == "/unqueue":
+            await self._say(dest, f"🗑 Dropped {dropped} queued message(s)."
+                            if dropped else "Nothing was queued.")
+            return
+        if session_id not in self._turn_dest:
+            # Cancelling anyway would be harmless, but claiming to have
+            # stopped a turn that was not running is how a user learns to
+            # distrust the feedback.
+            await self._say(dest, "No turn is running."
+                            + (f" Dropped {dropped} queued message(s)."
+                               if dropped else ""))
+            return
+        try:
+            await self.daemon.cancel(session_id)
+        except ApiError as error:
+            log.warning("could not cancel the turn for %s", session_id, exc_info=True)
+            await self._say(dest, f"Could not stop the turn: {error}")
+            return
+        log.info("turn stop requested: session=%s command=%s dropped=%d",
+                 session_id, command, dropped)
+        # Deliberately not "stopped": cancellation is a request, and the turn
+        # ends when the daemon says so. That moment already stamps "Turn
+        # cancelled" on the progress message, which is the real confirmation.
+        note = "🛑 Stopping the turn…"
+        if dropped:
+            note += f" Dropped {dropped} queued message(s)."
+        await self._say(dest, note)
 
     # --- attachments -------------------------------------------------------
 
@@ -1568,7 +1643,8 @@ only channel left, repairing FalconFox from here is what this chat is for.
                     f"turn={self._turn_id.get(session_id) or '?'} "
                     f"activity={self._activity_state.get(session_id) or '?'} "
                     f"buffered={buffered} delivered={self._delivered.get(session_id, 0)} "
-                    f"quiet={quiet} started {age}")
+                    f"quiet={quiet} started {age} "
+                    f"queued={len(self._queues.get(session_id, []))}")
         return "\n".join(lines)
 
     def _start_activity(self, session_id: str, dest: Dest) -> bool:
@@ -1736,16 +1812,57 @@ only channel left, repairing FalconFox from here is what this chat is for.
             # and leave the turn silent for the rest of its life.
             log.debug("chat action %s failed for %s: %s", action, session_id, error)
 
+    async def _enqueue_message(self, session_id: str, dest: Dest, text: str,
+                               prompt_msg: int | None = None) -> None:
+        """Hold a mid-turn message and say that it is held."""
+        queue = self._queues.setdefault(session_id, [])
+        queue.append({"text": text, "message_id": prompt_msg})
+        self._persist_turns()
+        log.info("queued mid-turn message: session=%s dest=%s depth=%d",
+                 session_id, dest, len(queue))
+        note = (QUEUED_FIRST if len(queue) == 1
+                else QUEUED_MORE.format(count=len(queue)))
+        await self._say(dest, note, reply_to=prompt_msg)
+
+    def _drop_queue(self, session_id: str) -> int:
+        dropped = len(self._queues.pop(session_id, []))
+        if dropped:
+            self._persist_turns()
+        return dropped
+
+    async def _flush_queue(self, session_id: str, dest: Dest) -> None:
+        """Send what was queued, as one prompt.
+
+        Consecutive messages on a phone are usually one thought split by the
+        send button, so they are joined rather than run as separate turns.
+        The reply threads to the last of them, which is the one still on
+        screen.
+
+        Called only from the end of a turn -- by design, since that is the one
+        moment the daemon will accept a prompt again, and it makes a stopped
+        turn and a finished one take the same path.
+        """
+        queued = self._queues.pop(session_id, [])
+        if not queued:
+            return
+        self._persist_turns()
+        text = "\n\n".join(item["text"] for item in queued)
+        log.info("flushing queue: session=%s messages=%d chars=%d",
+                 session_id, len(queued), len(text))
+        await self._forward(session_id, dest, text,
+                            prompt_msg=queued[-1].get("message_id"))
+
     async def _forward(self, session_id: str, dest: Dest, text: str,
                        prompt_msg: int | None = None) -> None:
         if session_id in self._turn_dest:
             # The daemon refuses a prompt while a turn is running, and says so
-            # with an *info* notice -- which this client does not surface, so the
-            # message vanished without a trace. Worse, forwarding it anyway reset
-            # the buffers below and destroyed the reply already in flight. Refuse
-            # here instead, and say so, so the text is never silently eaten.
-            log.info("refused mid-turn message: session=%s dest=%s", session_id, dest)
-            await self._say(dest, BUSY_TURN, reply_to=prompt_msg)
+            # with an *info* notice -- which this client does not surface, so
+            # the message vanished without a trace. Forwarding it anyway was
+            # worse: it reset the buffers below and destroyed the reply
+            # already in flight. So it is kept here instead, and sent when the
+            # turn ends -- retyping on a phone is the thing this exists to
+            # avoid.
+            await self._enqueue_message(session_id, dest, text, prompt_msg)
             return
         log.info("forward: session=%s dest=%s chars=%d", session_id, dest, len(text))
         self._turn_dest[session_id] = dest
@@ -2043,6 +2160,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
                             session_id, turn_id, detail)
                 await self._say(dest, SILENT_TURN.format(detail=detail),
                                             reply_to=prompt_msg)
+        # Last, and outside the had_turn branch: a queue drains whenever a turn
+        # ends, however it ended. /stop does not flush anything itself -- it
+        # ends the turn, and this is what ending a turn does.
+        if dest is not None:
+            await self._flush_queue(session_id, dest)
 
     async def _activity_loop(self, session_id: str, dest: Dest) -> None:
         try:

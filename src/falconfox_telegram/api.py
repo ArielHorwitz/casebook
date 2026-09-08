@@ -109,6 +109,11 @@ class DaemonApi:
     async def delete(self, session_id: str) -> None:
         await _json_request(f"{self.base_url}/api/sessions/{session_id}", "DELETE")
 
+    async def cancel(self, session_id: str) -> None:
+        """End the running turn. Harmless when there is none."""
+        await _json_request(f"{self.base_url}/api/sessions/{session_id}/cancel",
+                            "POST", {})
+
     async def rename(self, session_id: str, name: str) -> None:
         await _json_request(f"{self.base_url}/api/sessions/{session_id}/rename",
                             "POST", {"name": name})

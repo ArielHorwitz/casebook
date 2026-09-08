@@ -217,6 +217,7 @@ COMMANDS = (
     ("/new [path] [name]", "spawn a session, defaulting to the default path"),
     ("/home [name]", "spawn a session in the default path"),
     ("/name <name>", "rename this topic's session"),
+    ("/tags [tags...]", "show this session's tags, or replace them (`-` clears)"),
     ("/stop", "end the running turn; anything queued goes out after it"),
     ("/unqueue", "drop what is queued, leaving the turn running"),
     ("/fullstop", "drop what is queued and end the turn"),
@@ -315,6 +316,9 @@ class FalconFoxTelegramBot:
         # tag -> custom emoji id, resolved once at startup from the user's
         # `[telegram.topic_icons]` map. Empty when they configured none.
         self._icon_map: dict[str, str] = {}
+        # The same map as configured, kept for showing: /tags can print the
+        # glyph itself, where the id is nineteen digits of nothing.
+        self._icon_emoji: dict[str, str] = {}
         self._turn_dest: dict[str, Dest] = {}
         # Messages typed while a turn was running, per session, each with the
         # message id that carried it. Held here rather than in the daemon,
@@ -989,6 +993,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 self._icon_map[tag] = value
             elif value in by_emoji:
                 self._icon_map[tag] = by_emoji[value]
+                self._icon_emoji[tag] = value
             else:
                 log.warning("topic icon for tag %r is not an allowed forum "
                             "icon: %r", tag, value)
@@ -1350,10 +1355,50 @@ only channel left, repairing FalconFox from here is what this chat is for.
             # event, so it happens whoever renamed the session.
             await self._say(dest, f"Renamed session to {' '.join(parts[1:])}.")
             return True
+        if command == "/tags":
+            await self._tags_command(dest, parts[1:])
+            return True
         if command in ("/stop", "/unqueue", "/fullstop"):
             await self._stop_command(dest, command)
             return True
         return False
+
+    async def _tags_command(self, dest: Dest, tags: list[str]) -> None:
+        """Show this session's tags, or replace them.
+
+        No arguments shows rather than clears, because showing is what you
+        want nine times out of ten and clearing by accident is not
+        recoverable from the chat. `-` is the explicit clear.
+        """
+        session_id = self._chat_session(dest)
+        if session_id is None:
+            await self._say(dest, "No FalconFox session speaks in this chat.")
+            return
+        if not tags:
+            sessions = await self.daemon.sessions(include_hidden=True)
+            current = next((item.get("tags") or [] for item in sessions
+                            if item["session_id"] == session_id), [])
+            await self._say(dest, self._tags_report(current))
+            return
+        try:
+            session = await self.daemon.tag(session_id, [] if tags == ["-"] else tags)
+        except ApiError as error:
+            await self._say(dest, f"Could not set tags: {error}")
+            return
+        # The icon follows from the daemon's session_updated event, so it
+        # lands whoever set the tags -- here, the CLI, or the manager.
+        await self._say(dest, self._tags_report(session.get("tags") or []))
+
+    def _tags_report(self, tags: list[str]) -> str:
+        """What the tags are, and which of them is the one being drawn."""
+        lines = [f"🏷 {', '.join(tags)}" if tags else "🏷 No tags."]
+        drawn = next((tag for tag in tags if tag in self._icon_emoji), None)
+        if drawn:
+            lines.append(f"Topic icon: {self._icon_emoji[drawn]} (from {drawn})")
+        if self._icon_emoji:
+            lines.append("Configured: " + " · ".join(
+                f"{glyph} {tag}" for tag, glyph in self._icon_emoji.items()))
+        return "\n".join(lines)
 
     async def _stop_command(self, dest: Dest, command: str) -> None:
         """End the turn, drop the queue, or both.

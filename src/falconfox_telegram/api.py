@@ -91,8 +91,9 @@ class DaemonApi:
     async def version(self) -> dict:
         return await _json_request(f"{self.base_url}/api/version")
 
-    async def sessions(self) -> list[dict]:
-        return await _json_request(f"{self.base_url}/api/sessions")
+    async def sessions(self, include_hidden: bool = False) -> list[dict]:
+        suffix = "?include_hidden=true" if include_hidden else ""
+        return await _json_request(f"{self.base_url}/api/sessions{suffix}")
 
     async def session(self, session_id: str) -> dict:
         """Session metadata plus its full transcript."""
@@ -108,6 +109,11 @@ class DaemonApi:
 
     async def delete(self, session_id: str) -> None:
         await _json_request(f"{self.base_url}/api/sessions/{session_id}", "DELETE")
+
+    async def tag(self, session_id: str, tags: list[str]) -> dict:
+        """Replace a session's tags; the response carries what stuck."""
+        return await _json_request(f"{self.base_url}/api/sessions/{session_id}/tag",
+                                   "POST", {"tags": tags})
 
     async def cancel(self, session_id: str) -> None:
         """End the running turn. Harmless when there is none."""

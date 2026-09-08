@@ -107,6 +107,10 @@ to the daemon, ✍ being worked on, 👌 finished, 💔 cancelled or dropped, �
 A reaction costs no message, which is the point in a chat where every line is
 clutter on a phone screen.
 
+A session can carry **tags** - `/tags urgent` in its topic, or `falconfox tag`
+- which are opaque labels that the forum draws as the topic's icon, one per
+tag, mapped in `config.toml`.
+
 A message written while a turn is running is **queued**, not refused: it goes
 out when the turn ends, and several of them are joined into one prompt. `/stop`
 ends the running turn, which is what makes the queue drain; `/unqueue` drops

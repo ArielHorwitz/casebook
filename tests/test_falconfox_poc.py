@@ -2427,6 +2427,82 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
                              "the reply lands whatever the decoration does")
 
 
+class TagsCommandTests(unittest.IsolatedAsyncioTestCase):
+    """Tagging from the topic itself, without going through the manager."""
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._bind("session", 20)
+        bot._icon_map = {"archived": "5001", "urgent": "5002"}
+        bot._icon_emoji = {"archived": "📁", "urgent": "❗️"}
+        self.tagged = []
+        outer = self
+
+        class FakeDaemon:
+            tags = ["urgent"]
+
+            async def sessions(inner, include_hidden=False):
+                return [{"session_id": "session", "tags": list(inner.tags)}]
+
+            async def tag(inner, session_id, tags):
+                outer.tagged.append((session_id, tags))
+                inner.tags = list(tags)
+                return {"session_id": session_id, "tags": list(tags)}
+
+        bot.daemon = FakeDaemon()
+        return bot
+
+    def _update(self, text):
+        return {"message": {"chat": {"id": -1001}, "text": text,
+                            "message_thread_id": 20, "message_id": 1,
+                            "from": {"id": 7}}}
+
+    async def test_bare_tags_shows_rather_than_clears(self):
+        # Clearing by accident is not recoverable from the chat.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("/tags"))
+            self.assertEqual(self.tagged, [])
+            self.assertIn("urgent", bot.telegram.messages[0][1])
+
+    async def test_the_report_names_the_icon_actually_drawn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("/tags urgent archived"))
+            body = bot.telegram.messages[0][1]
+            self.assertIn("❗️ (from urgent)", body,
+                          "the first mapped tag is the one on the topic")
+            self.assertIn("📁 archived", body, "the rest are still offered")
+
+    async def test_tags_replace_the_whole_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("/tags archived slow"))
+            self.assertEqual(self.tagged, [("session", ["archived", "slow"])])
+
+    async def test_a_lone_hyphen_clears(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("/tags -"))
+            self.assertEqual(self.tagged, [("session", [])])
+            self.assertIn("No tags", bot.telegram.messages[0][1])
+
+    async def test_a_refused_tag_is_reported_not_swallowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+
+            async def _refuse(session_id, tags):
+                raise ApiError("tags must not contain whitespace")
+
+            bot.daemon.tag = _refuse
+            await bot._handle_update(self._update("/tags 'needs review'"))
+            self.assertIn("Could not set tags", bot.telegram.messages[0][1])
+
+
 class VersionTests(unittest.TestCase):
     """Which answer wins when the build-time stamp and git disagree."""
 

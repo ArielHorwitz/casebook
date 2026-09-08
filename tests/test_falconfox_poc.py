@@ -25,7 +25,9 @@ from falconfox.engine.session import AgentSession
 from falconfox.storage import SessionStore
 from falconfox.watchdog import StallWatchdog
 from falconfox_telegram.api import ApiError, _json_request
-from falconfox_telegram.bot import (QUEUED_FIRST, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
+from falconfox_telegram.bot import (QUEUED_FIRST, REACT_QUEUED, REACT_RECEIVED,
+                                    REACT_RUNNING, REACT_DONE, REACT_DISCARDED,
+                                    REACT_FAILED, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
 from falconfox_telegram.bot import COMMANDS, PHOTO_LIMIT_BYTES, _upload_kind
@@ -435,6 +437,10 @@ class FakeTelegram:
     async def icon_stickers(self):
         return [{"emoji": "📁", "custom_emoji_id": "5001"},
                 {"emoji": "❗️", "custom_emoji_id": "5002"}]
+
+    async def set_reaction(self, chat_id, message_id, emoji):
+        self.reactions = getattr(self, "reactions", [])
+        self.reactions.append((message_id, emoji))
 
     async def delete_message(self, chat_id, message_id):
         self.deleted_messages = getattr(self, "deleted_messages", [])
@@ -2229,7 +2235,11 @@ class QueueAndStopTests(unittest.IsolatedAsyncioTestCase):
             bot = self._bot(directory)
             await bot._handle_update(self._update("first", message_id=11))
             await bot._handle_update(self._update("second", message_id=12))
-            self.assertIn("(2)", bot.telegram.messages[1][1])
+            self.assertEqual(len(bot.telegram.messages), 1,
+                             "the ways out are said once, not once per message")
+            self.assertEqual(bot.telegram.reactions,
+                             [(11, REACT_QUEUED), (12, REACT_QUEUED)],
+                             "each queued message says so at no message cost")
             await self._idle(bot)
             self.assertEqual([item["text"] for item in self.sent],
                              ["first\n\nsecond"])
@@ -2306,6 +2316,115 @@ class QueueAndStopTests(unittest.IsolatedAsyncioTestCase):
             restarted._adopt_turn("session", record)
             self.assertEqual([item["text"] for item in restarted._queues["session"]],
                              ["after you"])
+
+
+class ReactionTests(unittest.IsolatedAsyncioTestCase):
+    """The user's own message carries what happened to it, at no message cost."""
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._bind("session", 20)
+        self.cancelled = []
+
+        class FakeWebSocket:
+            async def send(inner, payload):
+                pass
+
+        class FakeDaemon:
+            async def cancel(inner, session_id):
+                self.cancelled.append(session_id)
+
+        bot._ws = FakeWebSocket()
+        bot.daemon = FakeDaemon()
+        return bot
+
+    def _update(self, text, message_id=1):
+        return {"message": {"chat": {"id": -1001}, "text": text,
+                            "message_thread_id": 20, "message_id": message_id,
+                            "from": {"id": 7}}}
+
+    async def _run_turn(self, bot, *, outcome="completed", stop=None, deliver=True):
+        await bot._handle_event({"type": "turn_started", "session_id": "session",
+                                 "turn_id": "t1"})
+        if deliver:
+            await bot._handle_event({"type": "message", "session_id": "session",
+                                     "role": "agent", "text": "the answer"})
+        await bot._handle_event({"type": "turn_ended", "session_id": "session",
+                                 "turn_id": "t1", "outcome": outcome,
+                                 "stop_reason": stop})
+
+    async def test_a_message_walks_from_received_to_running_to_done(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("do the thing", message_id=11))
+            await self._run_turn(bot)
+            self.assertEqual(bot.telegram.reactions,
+                             [(11, REACT_RECEIVED), (11, REACT_RUNNING),
+                              (11, REACT_DONE)])
+
+    async def test_a_cancelled_turn_marks_the_message_discarded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("never mind", message_id=11))
+            await self._run_turn(bot, stop="cancelled", deliver=False)
+            self.assertEqual(bot.telegram.reactions[-1], (11, REACT_DISCARDED))
+
+    async def test_an_errored_turn_marks_the_message_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("do the thing", message_id=11))
+            await self._run_turn(bot, outcome="error", deliver=False)
+            self.assertEqual(bot.telegram.reactions[-1], (11, REACT_FAILED))
+
+    async def test_a_turn_that_delivered_nothing_counts_as_failed(self):
+        # The silent-turn case: it ends "successfully" with nothing to show,
+        # which is the failure this client kept producing invisibly.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("do the thing", message_id=11))
+            await self._run_turn(bot, deliver=False)
+            self.assertEqual(bot.telegram.reactions[-1], (11, REACT_FAILED))
+
+    async def test_unqueueing_marks_every_message_it_dropped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("start", message_id=10))
+            await bot._handle_update(self._update("and also", message_id=11))
+            await bot._handle_update(self._update("and this", message_id=12))
+            await bot._handle_update(self._update("/unqueue", message_id=13))
+            self.assertEqual(bot.telegram.reactions[-2:],
+                             [(11, REACT_DISCARDED), (12, REACT_DISCARDED)])
+
+    async def test_flushing_clears_the_queued_glyph_from_all_but_the_last(self):
+        # They become one prompt, addressed by the last of them; "queued"
+        # stopped being true for the rest the moment it went out.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._update("start", message_id=10))
+            await bot._handle_update(self._update("and also", message_id=11))
+            await bot._handle_update(self._update("and this", message_id=12))
+            bot.telegram.reactions.clear()
+            await bot._handle_event({"type": "turn_ended", "session_id": "session",
+                                     "turn_id": "t1", "outcome": "completed"})
+            self.assertIn((11, None), bot.telegram.reactions)
+            self.assertIn((12, REACT_RECEIVED), bot.telegram.reactions)
+
+    async def test_a_failed_reaction_never_costs_a_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+
+            async def _explode(chat_id, message_id, emoji):
+                raise ApiError("Bad Request: REACTION_INVALID")
+
+            bot.telegram.set_reaction = _explode
+            await bot._handle_update(self._update("do the thing", message_id=11))
+            await self._run_turn(bot)
+            self.assertEqual(bot.telegram.html_messages[0][2], "the answer",
+                             "the reply lands whatever the decoration does")
 
 
 class VersionTests(unittest.TestCase):

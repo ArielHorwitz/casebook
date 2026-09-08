@@ -59,25 +59,6 @@ resolve to one of those rather than becoming a daemon-level concept — likely b
 setting the ACP `model` config option at session start, with the env-var route
 staying the escape hatch for values a backend does not advertise.
 
-## A reaction on the prompt message as a turn marker
-
-*From the turn-feedback case, 2026-08-28.*
-
-Liked rather than rejected, and parked when that case closed. React to the
-user's own prompt message to mark the turn — one glyph on receipt, another on
-completion — giving turn-received and turn-done feedback at **zero message
-cost**, in a chat where every added message is clutter on a phone screen.
-
-Reply-threading already took the notification half of the original idea (the
-reply quotes the prompt, so the phone notification carries its context). The
-marker half is still available and independent of it. The case it came from
-shipped enough turn feedback that this is now a refinement rather than a gap,
-which is exactly why it is here and not in that case.
-
-There is a second taker now, shipped 2026-09-08: a message queued mid-turn is
-acknowledged with a reply, which is a message the chat did not have before. A
-reaction on the queued message would say the same thing for none.
-
 ## Make use of Telegram message streaming
 
 *From the phone, 2026-08-28.*

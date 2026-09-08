@@ -285,6 +285,18 @@ class TelegramApi:
         """The custom emoji allowed as topic icons. No arguments, no rights."""
         return await self.call("getForumTopicIconStickers") or []
 
+    async def set_reaction(self, chat_id: int, message_id: int,
+                           emoji: str | None) -> None:
+        """Put the bot's single reaction on a message; None removes it.
+
+        A bot gets one reaction per message, so this replaces rather than
+        adds -- which is what a state marker wants anyway.
+        """
+        await self.call("setMessageReaction", {
+            "chat_id": chat_id, "message_id": message_id,
+            "reaction": [{"type": "emoji", "emoji": emoji}] if emoji else [],
+        })
+
     async def delete_message(self, chat_id: int, message_id: int) -> None:
         await self.call("deleteMessage",
                         {"chat_id": chat_id, "message_id": message_id})

@@ -102,6 +102,11 @@ by the manager agent. There is no focus pointer and no `/switch`: a topic *is*
 the address, so there is nothing left to switch. During turns the bot refreshes Telegram's
 typing indicator, suppresses tool calls, and sends the final reply as one message.
 
+Your own message carries what became of it, as a reaction: 👀 queued, 🫡 handed
+to the daemon, ✍ being worked on, 👌 finished, 💔 cancelled or dropped, 😱 failed.
+A reaction costs no message, which is the point in a chat where every line is
+clutter on a phone screen.
+
 A message written while a turn is running is **queued**, not refused: it goes
 out when the turn ends, and several of them are joined into one prompt. `/stop`
 ends the running turn, which is what makes the queue drain; `/unqueue` drops

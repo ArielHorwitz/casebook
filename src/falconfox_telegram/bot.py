@@ -35,14 +35,31 @@ log = logging.getLogger("falconfox.telegram")
 # -updating from inside a session makes restarts routine, so they get announced.
 DAEMON_DOWN = "\u26a0\ufe0f Daemon connection lost \u2014 reconnecting."
 DAEMON_UP = "\u2705 FalconFox is up"
+# What happened to the message the user sent, marked on that message itself.
+# A reaction costs no message and no service message, which is the whole
+# point in a chat where every line is clutter on a phone screen -- and a bot
+# gets exactly one reaction per message, which suits it, since a message is
+# in exactly one state.
+#
+# Written as escapes on purpose: these are Telegram's own ReactionTypeEmoji
+# values, bare codepoints with no variation selector, and an escape is the
+# only way that stays visible to whoever edits this next.
+REACT_QUEUED = "\U0001f440"     # 👀 held while another turn runs
+REACT_RECEIVED = "\U0001fae1"   # 🫡 handed to the daemon, not yet started
+REACT_RUNNING = "\u270d"        # ✍ the agent is working on it
+REACT_DONE = "\U0001f44c"       # 👌 finished and delivered
+REACT_DISCARDED = "\U0001f494"  # 💔 cancelled, unqueued, or otherwise dropped
+REACT_FAILED = "\U0001f631"     # 😱 errored, lost, or delivered nothing
+
 # Queued rather than refused. The first one explains itself, because the two
 # ways out are not discoverable; the rest just count, because the whole point
 # is to add less to the chat than retyping would.
+# Said once per turn, not once per message: the reaction says "queued" on
+# every one of them, but no reaction can say what the ways out are.
 QUEUED_FIRST = (
     "📥 Queued — it goes out when this turn ends.\n"
     "/stop ends the turn now · /unqueue drops it · /fullstop does both."
 )
-QUEUED_MORE = "📥 Queued ({count}) — they go out together when this turn ends."
 # The recurring silent failure: a turn ends, nothing was ever delivered, and no
 # layer had an error to report. Now the moment it happens, the chat hears it.
 SILENT_TURN = "⚠️ The turn ended without delivering a reply ({detail})."
@@ -542,6 +559,9 @@ class FalconFoxTelegramBot:
             if state is None:
                 log.warning("persisted turn lost: session=%s no longer exists", session_id)
                 await self._say(dest, LOST_TURN.format(session_id=session_id))
+                await self._react(dest, record.get("prompt_msg"), REACT_FAILED)
+                for item in record.get("queued") or []:
+                    await self._react(dest, item.get("message_id"), REACT_FAILED)
                 if record.get("queued"):
                     # The turn's own reply is gone with the session; say the
                     # queued messages went with it rather than dropping them
@@ -1337,9 +1357,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
             await self._say(dest, "No FalconFox session speaks in this chat.")
             return
         dropped = (self._drop_queue(session_id)
-                   if command in ("/unqueue", "/fullstop") else 0)
+                   if command in ("/unqueue", "/fullstop") else [])
+        for item in dropped:
+            await self._react(dest, item.get("message_id"), REACT_DISCARDED)
         if command == "/unqueue":
-            await self._say(dest, f"🗑 Dropped {dropped} queued message(s)."
+            await self._say(dest, f"🗑 Dropped {len(dropped)} queued message(s)."
                             if dropped else "Nothing was queued.")
             return
         if session_id not in self._turn_dest:
@@ -1347,7 +1369,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
             # stopped a turn that was not running is how a user learns to
             # distrust the feedback.
             await self._say(dest, "No turn is running."
-                            + (f" Dropped {dropped} queued message(s)."
+                            + (f" Dropped {len(dropped)} queued message(s)."
                                if dropped else ""))
             return
         try:
@@ -1363,7 +1385,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
         # cancelled" on the progress message, which is the real confirmation.
         note = "🛑 Stopping the turn…"
         if dropped:
-            note += f" Dropped {dropped} queued message(s)."
+            note += f" Dropped {len(dropped)} queued message(s)."
         await self._say(dest, note)
 
     # --- attachments -------------------------------------------------------
@@ -1812,6 +1834,23 @@ only channel left, repairing FalconFox from here is what this chat is for.
             # and leave the turn silent for the rest of its life.
             log.debug("chat action %s failed for %s: %s", action, session_id, error)
 
+    async def _react(self, dest: Dest, message_id: int | None,
+                     emoji: str | None) -> None:
+        """Mark a message with the bot's one reaction. Best-effort.
+
+        There is no endpoint listing the emoji Telegram accepts as reactions,
+        so a wrong one can only fail at the call. It fails loudly in the log
+        and silently in the chat: a lost marker is decoration, and must never
+        cost a turn.
+        """
+        if message_id is None:
+            return
+        try:
+            await self.telegram.set_reaction(dest.chat, message_id, emoji)
+        except ApiError:
+            log.warning("could not react %r to message %s", emoji, message_id,
+                        exc_info=True)
+
     async def _enqueue_message(self, session_id: str, dest: Dest, text: str,
                                prompt_msg: int | None = None) -> None:
         """Hold a mid-turn message and say that it is held."""
@@ -1820,12 +1859,12 @@ only channel left, repairing FalconFox from here is what this chat is for.
         self._persist_turns()
         log.info("queued mid-turn message: session=%s dest=%s depth=%d",
                  session_id, dest, len(queue))
-        note = (QUEUED_FIRST if len(queue) == 1
-                else QUEUED_MORE.format(count=len(queue)))
-        await self._say(dest, note, reply_to=prompt_msg)
+        await self._react(dest, prompt_msg, REACT_QUEUED)
+        if len(queue) == 1:
+            await self._say(dest, QUEUED_FIRST, reply_to=prompt_msg)
 
-    def _drop_queue(self, session_id: str) -> int:
-        dropped = len(self._queues.pop(session_id, []))
+    def _drop_queue(self, session_id: str) -> list[dict]:
+        dropped = self._queues.pop(session_id, [])
         if dropped:
             self._persist_turns()
         return dropped
@@ -1849,6 +1888,11 @@ only channel left, repairing FalconFox from here is what this chat is for.
         text = "\n\n".join(item["text"] for item in queued)
         log.info("flushing queue: session=%s messages=%d chars=%d",
                  session_id, len(queued), len(text))
+        # They are one prompt now, and the last of them is its address: it
+        # carries the turn's markers from here. The rest lose their "queued"
+        # glyph, which stopped being true the moment this ran.
+        for item in queued[:-1]:
+            await self._react(dest, item.get("message_id"), None)
         await self._forward(session_id, dest, text,
                             prompt_msg=queued[-1].get("message_id"))
 
@@ -1889,6 +1933,10 @@ only channel left, repairing FalconFox from here is what this chat is for.
             await self._ws.send(json.dumps({
                 "action": "send", "session_id": session_id, "text": text,
             }))
+        # Handed over, but the agent may not have it yet: a stored session
+        # resumes an ACP subprocess first, and that gap is the one the typing
+        # indicator cannot tell apart from work.
+        await self._react(dest, prompt_msg, REACT_RECEIVED)
         # The progress message exists from the first moment of the turn (user
         # decision, 2026-08-25) -- sent after the prompt so a slow Telegram
         # call never delays the actual work, and silently: progress is
@@ -2007,6 +2055,8 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 self._turn_id[session_id] = event.get("turn_id") or ""
                 self._persist_turns()
                 log.info("turn started: session=%s turn=%s", session_id, event.get("turn_id"))
+                await self._react(self._turn_dest[session_id],
+                                  self._prompt_msg.get(session_id), REACT_RUNNING)
             return
         if event_type == "turn_ended":
             # The authoritative end of a turn. `idle` below stays only as a
@@ -2115,6 +2165,9 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 note = "✖️ Turn cancelled"
             else:
                 note = "✅ Turn finished"
+            marker = (REACT_FAILED if outcome == "error"
+                      else REACT_DISCARDED if stop == "cancelled"
+                      else REACT_DONE)
             if elapsed >= 0:
                 note += f" · {_format_elapsed(elapsed)}"
             if tools:
@@ -2158,8 +2211,10 @@ only channel left, repairing FalconFox from here is what this chat is for.
                     detail = f"the agent produced no output; stop reason: {stop or 'unknown'}"
                 log.warning("turn delivered nothing: session=%s turn=%s %s",
                             session_id, turn_id, detail)
+                marker = REACT_FAILED
                 await self._say(dest, SILENT_TURN.format(detail=detail),
                                             reply_to=prompt_msg)
+            await self._react(dest, prompt_msg, marker)
         # Last, and outside the had_turn branch: a queue drains whenever a turn
         # ends, however it ended. /stop does not flush anything itself -- it
         # ends the turn, and this is what ending a turn does.

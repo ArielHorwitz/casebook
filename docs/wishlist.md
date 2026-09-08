@@ -139,6 +139,27 @@ It was deferred behind the FalconFox session context, which needed the same
 channel and landed first (2026-09-07). That reason is spent: the channel
 exists, and this is a second producer for it.
 
+## Say something when an infrastructure session is tagged
+
+*From the /help environments case, 2026-09-08.*
+
+`/tags` acts on whichever session speaks in the chat it is typed in, so in
+General it tags the **session manager** and in the private chat it tags the
+concierge. Both are accepted in full: the tags are stored, reported back, and
+then never drawn, because a tag is rendered as a *topic* icon and neither of
+those sessions has a topic. Nothing is broken and nothing says so either.
+
+It reaches there three ways — the user typing `/tags` in General, `falconfox
+tag` naming an infrastructure session, and an agent tagging itself — and the
+last is the one that matters, since an agent that gets a success back has no
+way to learn that the label went nowhere.
+
+Wanted: one decision, applied to all three. Either refuse the tag with the
+reason, or keep accepting it and say plainly that nothing will draw it. Not
+done now because it is a question about what tags *mean* on a session with no
+topic, and answering it in passing while splitting `/help` would have been
+guessing.
+
 ## Deliberately not planned
 
 **Off-loopback remote access + bearer token.** Listed in the pivot case as the

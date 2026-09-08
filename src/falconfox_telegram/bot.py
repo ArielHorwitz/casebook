@@ -212,27 +212,48 @@ def _upload_kind(source: Path, raw: bool) -> tuple[str, str]:
     return method, field
 
 
-# Every chat command, in the order they are worth learning. Plain text rather
-# than a code block when sent: Telegram makes a bare /command tappable, and a
-# monospaced list that has to be retyped is a worse help message than a ragged
-# one that does not.
+# The commands, in three sections plus a preamble. One text, identical in
+# every chat (user decision, 2026-09-08): /help is where the whole vocabulary
+# is learned, and an earlier pass that tailored it per chat made a command
+# appear only where you had already thought to look for it. Where a command
+# is refused is said on the command's own line instead.
+#
+# Sections group by what a command acts on. That is a sharper cut than "here
+# versus elsewhere": /sh and /new are both usable anywhere and have nothing
+# else in common.
+MANAGEMENT = "Management"
+SESSION = "Session"
+EXECUTION = "Execution"
+PREAMBLE = None      # rendered above the sections, without one of its own
+
+SECTIONS = (
+    (MANAGEMENT, "Manage FalconFox and its sessions."),
+    (SESSION, "For specific sessions."),
+    (EXECUTION, "Execute commands outside of FalconFox."),
+)
+
+# Sent as HTML for the bold headers. That costs nothing that mattered: the
+# old plain send was to keep a bare /command tappable, and Telegram parses
+# those into bot_command entities in HTML too (checked against the live API
+# -- all sixteen come back tappable). Only a <code> or <pre> span would
+# swallow them, which is why the usages are not marked up.
 COMMANDS = (
-    ("/help", "this list"),
-    ("/status", "the daemon, the topics it knows, and any turn in flight"),
-    ("/list", "every session, most recently active first"),
-    ("/id", "this chat's session id, as a block to copy"),
-    ("/clear", "start this chat's session over, forgetting the conversation"),
-    ("/new [path] [name]", "spawn a session, defaulting to the default path"),
-    ("/home [name]", "spawn a session in the default path"),
-    ("/name <name>", "rename this topic's session"),
-    ("/tags [tags...]", "show this session's tags, or replace them (`-` clears)"),
-    ("/stop", "end the running turn; anything queued goes out after it"),
-    ("/unqueue", "drop what is queued, leaving the turn running"),
-    ("/fullstop", "drop what is queued and end the turn"),
-    ("/sh <command>", "run a command on the host, detached in tmux"),
-    ("/jobs", "shell jobs this bot has started"),
-    ("/tail <id>", "re-read a job's output"),
-    ("/kill <id>", "stop a running job"),
+    ("/help", "this list. Ask the bot for more about anything in it.", PREAMBLE),
+    ("/list", "list sessions", MANAGEMENT),
+    ("/new [path] [name]", "spawn a session", MANAGEMENT),
+    ("/home [name]", "spawn in the default path", MANAGEMENT),
+    ("/status", "show daemon status", MANAGEMENT),
+    ("/id", "session id", SESSION),
+    ("/tags [tags...]", "show or set tags (`-` clears)", SESSION),
+    ("/stop", "end the turn", SESSION),
+    ("/unqueue", "drop the queue", SESSION),
+    ("/fullstop", "drop queue and end turn", SESSION),
+    ("/name <name>", "rename session (topic only)", SESSION),
+    ("/clear", "clear session (special sessions only)", SESSION),
+    ("/sh <command>", "run a command in tmux", EXECUTION),
+    ("/jobs", "list running commands", EXECUTION),
+    ("/tail <id>", "re-read a job's output", EXECUTION),
+    ("/kill <id>", "stop a job", EXECUTION),
 )
 
 
@@ -274,6 +295,39 @@ def _format_count(count: int) -> str:
     if count >= 1_000:
         return f"{count / 1_000:.0f}k"
     return str(count)
+
+
+def _inline_code(text: str) -> str:
+    """HTML-escape, then let a `backticked` run through as an inline code
+    span. Unbalanced backticks are left alone rather than guessed at: a
+    swallowed half of a line is worse than a stray character."""
+    escaped = html.escape(text, quote=False)
+    parts = escaped.split("`")
+    if len(parts) % 2 == 0:
+        return escaped
+    return "".join(part if index % 2 == 0 else f"<code>{part}</code>"
+                   for index, part in enumerate(parts))
+
+
+def _build_help() -> tuple[str, str]:
+    """The help message, as (html, plain). Built once: it does not depend on
+    who asked or from where, and making that structural is the point."""
+    rich, plain = [], []
+    for usage, what, section in COMMANDS:
+        if section is PREAMBLE:
+            rich.append(f"{_inline_code(usage)} — {_inline_code(what)}")
+            plain.append(f"{usage} — {what}")
+    for title, explains in SECTIONS:
+        rich += ["", f"<b>{title}</b>", f"<i>{explains}</i>", ""]
+        plain += ["", title, explains, ""]
+        for usage, what, section in COMMANDS:
+            if section == title:
+                rich.append(f"{_inline_code(usage)} — {_inline_code(what)}")
+                plain.append(f"{usage} — {what}")
+    return "\n".join(rich), "\n".join(plain)
+
+
+HELP_HTML, HELP_PLAIN = _build_help()
 
 
 # Room left for the "and N more" line when a listing is capped, so that the
@@ -1360,9 +1414,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
         # /switch is gone with the pointer: a session is addressed by writing
         # in its topic, so there is nothing left to switch.
         if command == "/help":
-            await self._say(dest, "\n".join(
-                ["FalconFox commands:"]
-                + [f"{usage} — {what}" for usage, what in COMMANDS]))
+            await self._say_html(dest, HELP_HTML, HELP_PLAIN)
             return True
         if command == "/clear":
             await self._clear_chat_session(dest)

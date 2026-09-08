@@ -30,7 +30,8 @@ from falconfox_telegram.bot import (QUEUED_FIRST, REACT_QUEUED, REACT_RECEIVED,
                                     REACT_FAILED, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
-from falconfox_telegram.bot import COMMANDS, PHOTO_LIMIT_BYTES, _upload_kind
+from falconfox_telegram.bot import (COMMANDS, PHOTO_LIMIT_BYTES, SECTIONS,
+                                    _inline_code, _upload_kind)
 from falconfox_telegram.shell import ShellRunner, tail
 
 
@@ -2914,17 +2915,61 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
         source = inspect.getsource(FalconFoxTelegramBot._command)
         dispatched = set(re.findall(r'command (?:==|in \(?)\s*"(/[a-z]+)"', source))
         dispatched |= set(re.findall(r'"(/[a-z]+)"', source.split("if command", 1)[1]))
-        listed = {usage.split()[0] for usage, _ in COMMANDS}
+        listed = {usage.split()[0] for usage, _, _ in COMMANDS}
         self.assertTrue(dispatched, "found no commands to check against")
         self.assertEqual(dispatched - listed, set())
 
-    async def test_help_is_plain_text_so_the_commands_stay_tappable(self):
+    async def test_help_is_html_but_leaves_the_commands_bare(self):
+        # HTML now, for the bold section headers. Telegram still parses a bare
+        # /command into a tappable entity inside HTML -- checked against the
+        # live API -- but a <code> or <pre> span would swallow it, so the
+        # usages must stay unmarked.
         with tempfile.TemporaryDirectory() as directory:
             bot = self._bot(directory)
             await bot._command(Dest(-1001, None), "/help")
-            body = bot.telegram.messages[0][1]
-            self.assertIn("/sh <command>", body)
-            self.assertEqual(bot.telegram.html_messages, [])
+            self.assertEqual(bot.telegram.messages, [])
+            _, html_text, plain = bot.telegram.html_messages[0]
+            self.assertIn("<b>Management</b>", html_text)
+            self.assertIn("<i>For specific sessions.</i>", html_text)
+            self.assertIn("/sh &lt;command&gt;", html_text)
+            self.assertNotIn("<pre>", html_text)
+            for line in html_text.splitlines():
+                if line.startswith("/"):
+                    self.assertNotIn("<code>" + line[:2], line)
+            self.assertIn("/sh <command>", plain)
+            self.assertNotIn("<b>", plain)
+
+    async def test_help_is_one_text_wherever_it_is_asked_for(self):
+        # The whole vocabulary, in every chat. A per-chat /help made a command
+        # appear only where you had already thought to look for it.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            for dest in (Dest(-1001, 42), Dest(-1001, None), Dest(7, None)):
+                await bot._command(dest, "/help")
+            said = {message[1] for message in bot.telegram.html_messages}
+            self.assertEqual(len(said), 1)
+            listed = {line.split()[0] for line in said.pop().splitlines()
+                      if line.startswith("/")}
+            self.assertEqual(listed, {usage.split()[0] for usage, _, _ in COMMANDS})
+
+    async def test_help_keeps_each_command_under_its_own_section(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._command(Dest(-1001, 42), "/help")
+            plain = bot.telegram.html_messages[0][2]
+            section, seen = None, {}
+            for line in plain.splitlines():
+                if line in dict(SECTIONS):
+                    section = line
+                elif line.startswith("/"):
+                    seen[line.split()[0]] = section
+            self.assertEqual(seen["/help"], None, "the preamble has no section")
+            self.assertEqual(seen["/clear"], "Session")
+            self.assertEqual(seen["/kill"], "Execution")
+            self.assertEqual(seen["/new"], "Management")
+            # Section order is the reading order, not COMMANDS order.
+            self.assertLess(plain.index("Management"), plain.index("Session"))
+            self.assertLess(plain.index("Session"), plain.index("Execution"))
 
     async def test_id_answers_with_the_topic_s_session(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2971,6 +3016,22 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             await bot._command(Dest(-1001, None), "/sh   ")
             self.assertEqual(bot._shell.calls, [])
             self.assertIn("Usage: /sh", bot.telegram.messages[0][1])
+
+
+class InlineCodeTests(unittest.TestCase):
+    """The backtick-to-<code> conversion the help descriptions rely on."""
+
+    def test_a_backticked_run_becomes_a_code_span(self):
+        self.assertEqual(_inline_code("show or set tags (`-` clears)"),
+                         "show or set tags (<code>-</code> clears)")
+
+    def test_markup_in_the_text_is_escaped_not_trusted(self):
+        self.assertEqual(_inline_code("/name <name>"), "/name &lt;name&gt;")
+
+    def test_an_unbalanced_backtick_is_left_as_it_is(self):
+        # Guessing where the span ends would swallow the rest of the line,
+        # which is a worse outcome than one visible stray character.
+        self.assertEqual(_inline_code("a ` b"), "a ` b")
 
 
 class RenderingTests(unittest.TestCase):

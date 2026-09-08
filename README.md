@@ -96,11 +96,16 @@ final notice survive), and a delete removes it. You talk to a session by
 writing in its topic, so sessions run in parallel without interfering.
 
 **General** holds the session manager — an ephemeral session with a skill for
-spawning, renaming, stopping and deleting. `/new`, `/list`, `/name`, `/home`
-and `/status` are explicit fast paths; other General text is resolved naturally
-by the manager agent. There is no focus pointer and no `/switch`: a topic *is*
-the address, so there is nothing left to switch. During turns the bot refreshes Telegram's
-typing indicator, suppresses tool calls, and sends the final reply as one message.
+spawning, renaming, stopping and deleting. `/new`, `/list`, `/home` and
+`/status` are explicit fast paths; other General text is resolved naturally
+by the manager agent. `/name` is not among them: it renames the session whose
+topic you are writing in, so it belongs to a topic rather than to General.
+`/help` is one text, the same in every chat, grouped by what a command acts
+on: FalconFox and its sessions, one particular session, or the host. Where a
+command is refused is said on its own line rather than by hiding it.
+There is no focus pointer and no `/switch`: a topic *is* the address, so there
+is nothing left to switch. During turns the bot refreshes Telegram's typing
+indicator, suppresses tool calls, and sends the final reply as one message.
 
 Your own message carries what became of it, as a reaction: 👀 queued, 🫡 handed
 to the daemon, ✍ being worked on, 👌 finished, 💔 cancelled or dropped, 😱 failed.

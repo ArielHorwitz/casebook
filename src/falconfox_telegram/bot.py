@@ -35,6 +35,13 @@ log = logging.getLogger("falconfox.telegram")
 # -updating from inside a session makes restarts routine, so they get announced.
 DAEMON_DOWN = "\u26a0\ufe0f Daemon connection lost \u2014 reconnecting."
 DAEMON_UP = "\u2705 FalconFox is up"
+# Telegram's answer when an edit would change nothing. It is a 400, but it
+# means the topic is already how it was asked to be -- which is success for
+# anything that sets a state rather than performs an action. Read as failure
+# it is worse than noise: the caller never records what it wanted, so it asks
+# again on the next event, forever.
+TOPIC_UNCHANGED = "TOPIC_NOT_MODIFIED"
+
 # What happened to the message the user sent, marked on that message itself.
 # A reaction costs no message and no service message, which is the whole
 # point in a chat where every line is clutter on a phone screen -- and a bot
@@ -1027,9 +1034,14 @@ only channel left, repairing FalconFox from here is what this chat is for.
             return
         try:
             await self.telegram.set_topic_icon(self.forum_chat_id, thread, icon)
-        except ApiError:
-            log.warning("could not set the icon on topic %s", thread, exc_info=True)
-            return
+        except ApiError as error:
+            if TOPIC_UNCHANGED not in str(error):
+                log.warning("could not set the icon on topic %s", thread,
+                            exc_info=True)
+                return
+            # Already wearing it -- someone set it by hand, or a previous run
+            # did and the memory of it was lost. Record it and stop asking.
+            log.info("topic %s already had the icon asked for", thread)
         self._topic_icons[session_id] = icon
         self._persist_topics()
         log.info("topic icon set: session=%s thread=%s icon=%s",
@@ -2183,8 +2195,12 @@ only channel left, repairing FalconFox from here is what this chat is for.
             try:
                 await self.telegram.rename_topic(self.forum_chat_id, thread, name)
                 self._topic_names[session_id] = name
-            except ApiError:
-                log.warning("could not retitle topic %s", thread, exc_info=True)
+            except ApiError as error:
+                if TOPIC_UNCHANGED in str(error):
+                    # Already titled that; remembering it is the whole point.
+                    self._topic_names[session_id] = name
+                else:
+                    log.warning("could not retitle topic %s", thread, exc_info=True)
         await self._apply_icon(session, thread)
 
     async def _finish_turn(self, session_id: str, event: dict | None) -> None:

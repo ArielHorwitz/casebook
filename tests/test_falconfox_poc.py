@@ -2131,6 +2131,41 @@ class TopicIconTests(unittest.IsolatedAsyncioTestCase):
             await bot._apply_icon({"session_id": "work", "tags": ["archived"]}, 42)
             self.assertEqual(getattr(bot.telegram, "icons", []), [])
 
+    async def test_an_icon_already_in_place_counts_as_applied(self):
+        # Telegram calls this a 400, but it means the topic is already how it
+        # was asked to be. Read as failure, the bot never records it and asks
+        # again on every session_updated for the life of the process.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("work", 42)
+
+            async def _unchanged(chat_id, thread, icon):
+                raise ApiError("Bad Request: TOPIC_NOT_MODIFIED")
+
+            bot.telegram.set_topic_icon = _unchanged
+            session = {"session_id": "work", "tags": ["archived"]}
+            await bot._apply_icon(session, 42)
+            self.assertEqual(bot._topic_icons.get("work"), "5001")
+
+            calls = []
+            async def _count(chat_id, thread, icon):
+                calls.append(icon)
+            bot.telegram.set_topic_icon = _count
+            await bot._apply_icon(session, 42)
+            self.assertEqual(calls, [], "the retry loop is what this prevents")
+
+    async def test_a_title_already_in_place_counts_as_applied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("work", 42)
+
+            async def _unchanged(chat_id, thread, name):
+                raise ApiError("Bad Request: TOPIC_NOT_MODIFIED")
+
+            bot.telegram.rename_topic = _unchanged
+            await bot._mirror_session({"session_id": "work", "name": "the work"})
+            self.assertEqual(bot._topic_names.get("work"), "the work")
+
     async def test_the_applied_icon_survives_a_restart(self):
         # The Bot API cannot report a topic's icon, so the only alternative to
         # remembering is re-applying blindly -- a service message per topic

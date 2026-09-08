@@ -1083,6 +1083,14 @@ only channel left, repairing FalconFox from here is what this chat is for.
             log.info("topic orphaned: session=%s thread=%s no longer exists",
                      session_id, thread)
         for item in sessions:
+            # Remember the titles before anything mirrors them. Without this
+            # the map is empty after a restart, so the first session_updated
+            # per session retitles the topic to the name it already has --
+            # which Telegram refuses with a 400, once per session, every time
+            # the bot starts.
+            if item["session_id"] in self._topics:
+                self._topic_names.setdefault(item["session_id"],
+                                             item.get("name") or "")
             if item["session_id"] not in self._topics:
                 # Sequential, not gathered: topic management is rate-limited
                 # (429 retry-after observed), so a burst of creations on a
@@ -1199,6 +1207,10 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 await self._handle_membership(membership)
             return
         message = update.get("message") or {}
+        # Before identity is judged, and nothing else is: the notice an icon
+        # change causes is authored by the bot, so every later guard drops it
+        # -- and it is the one message here that exists to be deleted.
+        await self._sweep_icon_notice(message)
         sender = (message.get("from") or {}).get("id")
         if sender is not None and sender != self.config.owner_id:
             # "Which chat" used to answer "who": every configured chat was the
@@ -1242,7 +1254,6 @@ only channel left, repairing FalconFox from here is what this chat is for.
                    for key in message):
                 # Topic service messages are the bot's own lifecycle calls
                 # echoing back; answering them would spam every topic it makes.
-                await self._sweep_icon_notice(message)
                 return
             await self._say(dest, "Text messages only in this PoC.")
             return

@@ -2175,6 +2175,37 @@ class TopicIconTests(unittest.IsolatedAsyncioTestCase):
                 "forum_topic_edited": {"name": "renamed"}}})
             self.assertEqual(bot.telegram.deleted_messages, [(-1001, 7)])
 
+    async def test_the_notice_is_swept_though_the_bot_itself_authored_it(self):
+        # Observed live: the notice arrives authored by the bot, so the
+        # non-owner guard dropped it before the sweep ever ran and every icon
+        # change left its "changed the topic icon" line in the topic.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_id": 7, "message_thread_id": 42,
+                "from": {"id": 9999},
+                "forum_topic_edited": {"icon_custom_emoji_id": "5001"}}})
+            self.assertEqual(bot.telegram.deleted_messages, [(-1001, 7)])
+
+    async def test_reconciling_remembers_the_titles_it_found(self):
+        # Without this the title map is empty after a restart, so the first
+        # session_updated retitles every topic to the name it already has --
+        # which Telegram refuses, once per session, on every start.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot._bind("work", 42)
+
+            class _Daemon:
+                async def sessions(inner):
+                    return [{"session_id": "work", "name": "the work session"}]
+
+            bot.daemon = _Daemon()
+            await bot._reconcile_topics()
+            self.assertEqual(bot._topic_names.get("work"), "the work session")
+            await bot._mirror_session({"session_id": "work",
+                                       "name": "the work session"})
+            self.assertEqual(getattr(bot.telegram, "renamed", []), [])
+
 
 class QueueAndStopTests(unittest.IsolatedAsyncioTestCase):
     """A mid-turn message is kept, and a turn can be ended from the chat.

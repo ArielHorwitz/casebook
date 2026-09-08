@@ -66,7 +66,13 @@ async def _json_request(url: str, method: str = "GET", body: dict | None = None)
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as error:
             try:
-                detail = json.loads(error.read()).get("error") or str(error)
+                # "error" is the daemon's shape, "description" is Telegram's.
+                # Reading only the first turned every Bot API failure into a
+                # bare "HTTP Error 400: Bad Request", which says nothing about
+                # what was wrong with the request.
+                reported = json.loads(error.read())
+                detail = (reported.get("error") or reported.get("description")
+                          or str(error))
             except Exception:
                 detail = str(error)
             raise ApiError(detail) from error

@@ -10,6 +10,7 @@ import logging
 import mimetypes
 import os
 import shlex
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -113,6 +114,64 @@ class Dest(NamedTuple):
 QUIET_TURN_SECONDS = 180
 # Service messages that are not prompts. Topic events are the bot's own
 # lifecycle calls echoing back through the update stream.
+# What a non-text message can carry, and what to call it when Telegram sends
+# no name of its own. A photo never has one, and voice and video notes never
+# do either, so the kind supplies the stem and `getFile` supplies the
+# extension. Nothing else is read into the name: inventing
+# `IMG_20260909_142530.jpg` would be inventing provenance the API did not give.
+#
+# Order matters. One message can carry several of these fields at once, and
+# the first match is what the user actually sent.
+ATTACHMENT_KINDS = {
+    "photo": "photo",
+    "document": "document",
+    "video": "video",
+    "animation": "animation",
+    "audio": "audio",
+    "voice": "voice",
+    "video_note": "video-note",
+}
+
+# The tray receipt. It carries two things and needs both: the id, because
+# that is what `/tray` removes by, and the sentence, because a file that waits
+# silently reads as a file the bot ignored. See the case: a chat has no
+# compose step, so nothing else ties a photo to the message about it.
+TRAY_RECEIPT = "🗂 Filed {name} as {id}. It goes out with your next message."
+TRAY_EMPTY = "🗂 The tray is empty."
+
+
+def _attachment_of(message: dict) -> Optional[dict]:
+    """What the user sent, or None if this message carries no file."""
+    for kind, stem in ATTACHMENT_KINDS.items():
+        item = message.get(kind)
+        if not item:
+            continue
+        if kind == "photo":
+            # A list of renditions, smallest first. The last is the best one
+            # Telegram kept, and the only one worth having.
+            item = item[-1]
+        return {"kind": kind, "stem": stem, "file_id": item.get("file_id"),
+                "name": item.get("file_name"), "size": item.get("file_size") or 0}
+    return None
+
+
+def _attached_line(item: dict) -> str:
+    """One tray item, as the agent sees it.
+
+    A path rather than the bytes, which is today's single text block rather
+    than a preference -- an agent that can read a file loses little by opening
+    it itself.
+    """
+    caption = (item.get("caption") or "").strip().replace("\n", " ")
+    return f"attached: {item['path']}" + (f" ({caption})" if caption else "")
+
+
+def _format_bytes(count: int) -> str:
+    if count >= 1024 * 1024:
+        return f"{count / (1024 * 1024):.1f}MB"
+    return f"{max(1, count // 1024)}kB"
+
+
 _JOIN_EVENTS = {"new_chat_members", "left_chat_member", "group_chat_created",
                 "supergroup_chat_created", "migrate_from_chat_id"}
 
@@ -622,6 +681,14 @@ class FalconFoxTelegramBot:
         # with their conversation intact -- which means a restart has to find
         # them again, or it would make a second pair, then a third.
         self._infra_file = self.state_dir.joinpath("infra.json")
+        # The tray: files that have arrived for a session and not yet been
+        # carried into a prompt. Persisted for the same reason as the maps
+        # above, and it is the client's own state rather than the daemon's --
+        # the tray exists because a chat has no compose step, which is a fact
+        # about Telegram and about nothing else. The daemon holds the bytes;
+        # what is still pending is this file.
+        self._trays: dict[str, list[dict]] = {}
+        self._tray_file = self.state_dir.joinpath("tray.json")
         self._learned_forum: int | None = None
         self._bot_username: str | None = None
         # Directories for the two infrastructure sessions to run in. Nothing
@@ -636,6 +703,7 @@ class FalconFoxTelegramBot:
         self._load_forum()
         self._load_infra()
         self._load_topics()
+        self._load_tray()
         ws_url = self.config.daemon_url.replace("http://", "ws://", 1).replace(
             "https://", "wss://", 1
         ) + "/ws"
@@ -1125,6 +1193,94 @@ class FalconFoxTelegramBot:
         except OSError:
             log.warning("could not persist the topic map", exc_info=True)
 
+    # --- the tray ----------------------------------------------------------
+
+    def _load_tray(self) -> None:
+        try:
+            raw = json.loads(self._tray_file.read_text())
+        except (OSError, ValueError):
+            raw = {}
+        self._trays = {session: [item for item in items if isinstance(item, dict)]
+                       for session, items in raw.items() if items}
+
+    def _persist_tray(self) -> None:
+        """Write the tray atomically. Never fatal.
+
+        Losing this file is a recoverable state rather than a corrupt one: the
+        files are still in the daemon's store and nothing is pending, which is
+        the same as a tray that has just been swept.
+        """
+        try:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            temporary = self._tray_file.with_suffix(".tmp")
+            temporary.write_text(json.dumps(self._trays))
+            temporary.replace(self._tray_file)
+        except OSError:
+            log.warning("could not persist the tray", exc_info=True)
+
+    def _forget_tray(self, session_id: str) -> None:
+        """Drop a gone session's tray. The daemon has already taken the files
+        with the session, so there is nothing here but names for them."""
+        if self._trays.pop(session_id, None) is not None:
+            self._persist_tray()
+
+    def _sweep_tray(self, session_id: str) -> list[dict]:
+        """Take what is pending. The bytes stay: the agent is handed a path
+        and may read it during the turn or ten turns later."""
+        carried = self._trays.pop(session_id, [])
+        if carried:
+            self._persist_tray()
+        return carried
+
+    async def _receive_file(self, session_id: str, dest: Dest, message: dict,
+                            attachment: dict) -> None:
+        """Take a file into the session's tray, and say what became of it."""
+        prompt_msg = message.get("message_id")
+        size = attachment["size"]
+        if size > self.telegram.DOWNLOAD_LIMIT_BYTES:
+            # Checked from the message rather than discovered by a failing
+            # download, so the refusal is immediate and names the real reason.
+            await self._say(dest, f"That file is {_format_bytes(size)}. Telegram will "
+                            f"not let a bot download more than 20MB, though it lets "
+                            f"one send 50MB. Not our limit, and no way around it.",
+                            reply_to=prompt_msg)
+            await self._react(dest, prompt_msg, REACT_FAILED)
+            return
+        try:
+            remote = await self.telegram.file_path(attachment["file_id"])
+            name = attachment["name"] or f"{attachment['stem']}{Path(remote).suffix}"
+            with tempfile.TemporaryDirectory(prefix="falconfox-inbound-") as scratch:
+                local = Path(scratch, "download")
+                await self.telegram.download(remote, local)
+                # Handed over as a path: the client and the daemon share a
+                # filesystem, so the bytes never cross the socket. The daemon
+                # copies, which is what lets this scratch directory go.
+                stored = await self.daemon.add_file(session_id, str(local), name)
+        except (ApiError, OSError) as error:
+            log.warning("could not take a file for %s", session_id, exc_info=True)
+            await self._say(dest, f"Could not take that file: {error}",
+                            reply_to=prompt_msg)
+            await self._react(dest, prompt_msg, REACT_FAILED)
+            return
+        self._trays.setdefault(session_id, []).append({
+            "file_id": stored["file_id"], "path": stored["path"],
+            "name": stored["name"], "caption": message.get("caption"),
+            "message_id": prompt_msg,
+        })
+        self._persist_tray()
+        log.info("tray add: session=%s file=%s name=%s depth=%d", session_id,
+                 stored["file_id"], stored["name"], len(self._trays[session_id]))
+        # The reaction and the receipt say different things. The receipt says
+        # what happened, once; 👀 says what is still true, which is what makes
+        # the sweep visible later without spending another message on it.
+        await self._react(dest, prompt_msg, REACT_QUEUED)
+        await self._say_html(
+            dest,
+            TRAY_RECEIPT.format(name=html.escape(stored["name"], quote=False),
+                                id=f"<code>{stored['file_id']}</code>"),
+            TRAY_RECEIPT.format(name=stored["name"], id=stored["file_id"]),
+            reply_to=prompt_msg)
+
     def _bind(self, session_id: str, thread: int) -> None:
         self._topics[session_id] = thread
         self._threads[thread] = session_id
@@ -1426,13 +1582,19 @@ class FalconFoxTelegramBot:
             return
         dest = Dest(chat_id, message.get("message_thread_id"))
         text = message.get("text")
-        if not text:
+        # A file does not prompt the agent by itself: it goes to the tray and
+        # the next real message carries it. A caption travels with the file
+        # rather than counting as that message, because Telegram puts an
+        # album's caption on one of its parts, so a captioned photo would fire
+        # a turn while the rest of the album was still arriving.
+        attachment = None if text else _attachment_of(message)
+        if not text and attachment is None:
             if any(key.startswith("forum_topic_") or key in _JOIN_EVENTS
                    for key in message):
                 # Topic service messages are the bot's own lifecycle calls
                 # echoing back; answering them would spam every topic it makes.
                 return
-            await self._say(dest, "Text messages only in this PoC.")
+            await self._say(dest, "I can take files, but not that.")
             return
         if chat_id == self.config.owner_id:
             # The owner's private chat. Answered whether or not a forum is
@@ -1441,6 +1603,9 @@ class FalconFoxTelegramBot:
             target = await self._ensure_concierge()
             if target is None:
                 await self._say(dest, "Could not start the private-chat session.")
+                return
+            if attachment is not None:
+                await self._receive_file(target, dest, message, attachment)
                 return
             if text.startswith("/") and await self._command(dest, text):
                 return
@@ -1459,7 +1624,7 @@ class FalconFoxTelegramBot:
                     return
             log.info("ignoring message from unconfigured chat %s", chat_id)
             return
-        if text.startswith("/"):
+        if text and text.startswith("/"):
             if await self._command(dest, text):
                 return
         if dest.thread is None:
@@ -1472,6 +1637,9 @@ class FalconFoxTelegramBot:
             if not target:
                 await self._say(dest, "No FalconFox session owns this topic.")
                 return
+        if attachment is not None:
+            await self._receive_file(target, dest, message, attachment)
+            return
         await self._forward(target, dest, text, prompt_msg=message.get("message_id"))
 
     async def _command(self, dest: Dest, text: str) -> bool:
@@ -1798,10 +1966,12 @@ class FalconFoxTelegramBot:
             return f"⏳ {job.job_id} still running ({job.elapsed:.0f}s)"
         return f"{'✅' if status == 0 else '❌'} {job.job_id} exited {status}"
 
-    async def _say_html(self, dest: Dest, rich: str, plain: str) -> None:
+    async def _say_html(self, dest: Dest, rich: str, plain: str,
+                        reply_to: int | None = None) -> None:
         """Send pre-built HTML, with the plain text to fall back to. Both are
         the caller's: only it knows which parts of the line are markup."""
-        await self.telegram.html_message(dest.chat, rich, plain, thread=dest.thread)
+        await self.telegram.html_message(dest.chat, rich, plain, reply_to=reply_to,
+                                         thread=dest.thread)
 
     async def _say_block(self, dest: Dest, header: str, body: str) -> None:
         """Send `header` as text and `body` as a code block.
@@ -2215,6 +2385,14 @@ class FalconFoxTelegramBot:
             # avoid.
             await self._enqueue_message(session_id, dest, text, prompt_msg)
             return
+        carried = self._sweep_tray(session_id)
+        if carried:
+            # Leading the message rather than trailing it: the files are what
+            # the message is about, so they read as its context. One line each,
+            # in arrival order, each caption on its own line rather than merged
+            # into the user's words.
+            text = "\n".join(_attached_line(item) for item in carried) + "\n\n" + text
+            log.info("tray swept: session=%s files=%d", session_id, len(carried))
         log.info("forward: session=%s dest=%s chars=%d", session_id, dest, len(text))
         self._turn_dest[session_id] = dest
         self._reply_parts[session_id] = []
@@ -2244,6 +2422,11 @@ class FalconFoxTelegramBot:
         # resumes an ACP subprocess first, and that gap is the one the typing
         # indicator cannot tell apart from work.
         await self._react(dest, prompt_msg, REACT_RECEIVED)
+        # What was carried stops being pending, so it loses the 👀 it wore
+        # while it waited -- the same clearing `_flush_queue` does for the
+        # messages it joined into one prompt.
+        for item in carried:
+            await self._react(dest, item.get("message_id"), None)
         # The progress message exists from the first moment of the turn (user
         # decision, 2026-08-25) -- sent after the prompt so a slow Telegram
         # call never delays the actual work, and silently: progress is
@@ -2321,6 +2504,7 @@ class FalconFoxTelegramBot:
             await self._ensure_topic(event)
             return
         if event_type == "session_removed":
+            self._forget_tray(session_id)
             thread = self._unbind(session_id)
             if thread is not None:
                 try:

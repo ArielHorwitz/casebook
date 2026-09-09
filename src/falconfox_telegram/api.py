@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import shutil
 import urllib.error
 import urllib.request
 import uuid
@@ -139,10 +140,35 @@ class DaemonApi:
         await _json_request(f"{self.base_url}/api/sessions/{session_id}/rename",
                             "POST", {"name": name})
 
+    async def add_file(self, session_id: str, path: str,
+                       name: str | None = None) -> dict:
+        """Copy a file into the session's store. Answers with id and path.
+
+        The daemon and this client share a filesystem, so what crosses is a
+        path rather than the bytes -- the same handoff `attach` makes in the
+        other direction.
+        """
+        return await _json_request(f"{self.base_url}/api/sessions/{session_id}/files",
+                                   "POST", {"path": path, "name": name})
+
+    async def remove_file(self, session_id: str, file_id: str) -> dict:
+        return await _json_request(
+            f"{self.base_url}/api/sessions/{session_id}/files/{file_id}", "DELETE")
+
+    async def clear_files(self, session_id: str) -> dict:
+        return await _json_request(f"{self.base_url}/api/sessions/{session_id}/files",
+                                   "DELETE")
+
 
 class TelegramApi:
+    # `getFile` will not serve a file larger than this, against 50MB for
+    # upload. An asymmetry of the Bot API rather than a policy of ours, which
+    # is why a refusal says so.
+    DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
+
     def __init__(self, token: str) -> None:
         self.base_url = f"https://api.telegram.org/bot{token}"
+        self.file_url = f"https://api.telegram.org/file/bot{token}"
 
     async def call(self, method: str, body: dict | None = None):
         payload = await _json_request(f"{self.base_url}/{method}", "POST", body or {})
@@ -232,6 +258,45 @@ class TelegramApi:
                 raise ApiError(payload.get("description", f"{method} failed"))
 
         await asyncio.get_running_loop().run_in_executor(_REQUESTS, perform)
+
+    async def file_path(self, file_id: str) -> str:
+        """Where a file lives on Telegram's side, ready to be downloaded.
+
+        Kept apart from the download because the caller wants the answer for
+        its own sake: this path carries the only extension a photo ever has,
+        and photos arrive with no name at all.
+        """
+        described = await self.call("getFile", {"file_id": file_id})
+        remote = (described or {}).get("file_path")
+        if not remote:
+            raise ApiError("Telegram did not say where the file is")
+        return remote
+
+    async def download(self, remote_path: str, into: Path) -> Path:
+        """Fetch what `file_path` pointed at, writing it to `into`.
+
+        Files come from a different host to the API calls, which is the only
+        reason this is not just another `call`.
+        """
+        url = f"{self.file_url}/{remote_path}"
+
+        def perform() -> None:
+            request = urllib.request.Request(url, method="GET")
+            try:
+                # A download, sized like the upload timeout rather than the
+                # JSON one, and streamed so a 20MB file is never held twice.
+                with urllib.request.urlopen(request, timeout=110) as response:
+                    with into.open("wb") as sink:
+                        shutil.copyfileobj(response, sink)
+            except urllib.error.HTTPError as error:
+                raise ApiError(f"HTTP {error.code} fetching the file") from error
+            except (urllib.error.URLError, OSError) as error:
+                raise ApiError(f"{type(error).__name__}: {error}") from error
+
+        await asyncio.get_running_loop().run_in_executor(_REQUESTS, perform)
+        log.info("downloaded %s to %s (%d bytes)", remote_path, into,
+                 into.stat().st_size)
+        return into
 
     async def html_message(self, chat_id: int, html_text: str, plain_fallback: str,
                            reply_to: int | None = None,

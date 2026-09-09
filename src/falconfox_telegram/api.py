@@ -107,10 +107,11 @@ class DaemonApi:
 
     async def spawn(self, *, path: str, name: str | None = None,
                     backend: str | None = None, ephemeral: bool = False,
-                    hidden: bool | None = None) -> dict:
+                    hidden: bool | None = None,
+                    roles: list[str] | None = None) -> dict:
         return await _json_request(f"{self.base_url}/api/sessions", "POST", {
             "path": path, "name": name, "backend": backend,
-            "ephemeral": ephemeral, "hidden": hidden,
+            "ephemeral": ephemeral, "hidden": hidden, "roles": roles,
         })
 
     async def delete(self, session_id: str) -> None:

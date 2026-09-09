@@ -23,6 +23,7 @@ from websockets.exceptions import ConnectionClosed
 # could not even be attributed to a side, because neither process recorded its
 # own freezes. Both run the same watchdog; sharing it crosses no boundary.
 from falconfox import config as falconfox_config
+from falconfox import state as falconfox_state
 from falconfox.watchdog import StallWatchdog
 
 from .api import ApiError, DaemonApi, TelegramApi
@@ -210,6 +211,120 @@ def _upload_kind(source: Path, raw: bool) -> tuple[str, str]:
         if oversized:
             return "sendDocument", "document"
     return method, field
+
+
+def _write_atomic(path: Path, body: str) -> None:
+    """Write via a temporary name and rename into place.
+
+    The daemon reads these files on every spawn, so a plain write leaves a
+    window in which it can read half a file. Rename within a directory is
+    atomic, so a reader sees either the old file or the whole new one.
+    """
+    temporary = path.with_name(f".{path.name}.new")
+    temporary.write_text(body)
+    temporary.replace(path)
+
+
+# The Telegram client, described for a session that may be reached through it.
+#
+# Unconditional: every session gets this whether or not it is being spoken to
+# through Telegram right now, because a session started here may be resumed
+# from another client later, and the reverse.
+CLIENT_ORIENTATION = """# Talking through Telegram
+
+One of the clients relaying your messages is a Telegram bot. When a user
+writes to you from a phone, this is the shape of what they see.
+
+**Forums and topics.** The bot lives in a Telegram *forum*: a group chat split
+into *topics*, which are separate threads within it. Every session gets a topic
+of its own, and the user talks to a session by writing in its topic, so
+sessions run side by side without interfering. `General`, the forum's default
+topic, belongs to the session manager. There is also a private chat with the
+bot, which is where a user goes before a forum exists or when one breaks.
+
+**Typing is expensive.** The user is often on a phone, one-handed, sometimes
+walking. Session ids and other things they will have to hand back are sent as
+tap-to-copy text, and commands are single words. Prefer answers they can act on
+by tapping over answers they must retype. Assume a message may have been
+transcribed from speech, so a name that is almost right is more likely a
+mis-transcription than a new thing.
+
+**They see less than you think.** Your messages arrive, and a progress line
+naming your tool calls. Tool output does not, nor does your working directory.
+A file has to be sent with `falconfox attach <path>`; a path written into a
+message is just text.
+
+**Commands.** `/help` lists them, grouped by what they act on, and is the
+current answer rather than anything repeated here. Worth knowing that `/id`
+gives the user this chat's session id without spending a turn asking you, and
+that `/tags` sets a session's tags from its own topic -- the forum draws the
+first tag it has a symbol for as the topic's icon.
+
+**A photo may not be the original.** Telegram re-encodes images sent as photos.
+An image you are given may be a degraded copy of something sharper, and asking
+the user to resend it as a *file* rather than a photo gets you the original.
+This matters for screenshots of text, where re-encoding is the difference
+between readable and not.
+"""
+
+
+# Telegram's own role. Registered from here rather than the daemon because it
+# exists only because Telegram does: a private chat is the way in before a
+# forum exists.
+CONCIERGE_ORIENTATION = """# FalconFox private chat
+
+FalconFox is a daemon that runs agent sessions and connects them to a Telegram
+forum, where each session gets its own topic and the user talks to it by
+writing there. You are the private chat: the one channel that needs no
+configuration, so it is where the user arrives before a forum exists, and
+where they come back if the forum breaks. It is also the general help and meta
+channel.
+
+Read what the user actually wants: set things up when they want to start,
+diagnose when they report something wrong, answer when they ask. Most messages
+here are about none of those, so do not sweep for problems on every one.
+
+## Find out rather than assume
+
+FalconFox moves fast, so anything written here about its current state would be
+stale before you read it. Run `falconfox` commands, ask Telegram, and say what
+you found.
+
+## Three things you cannot discover by looking
+
+Facts about Telegram, not about this deployment:
+
+1. A bot cannot create a group, and cannot enable Topics. Both are the user's
+   to do; everything after them can be automated. Never imply otherwise.
+2. Topics must be enabled *before* the bot is added. Enabling them upgrades the
+   group to a supergroup and changes its chat id, so a bot added first holds an
+   id that goes stale moments later. This is the most likely way a setup
+   silently half-works.
+3. The bot can be added already promoted, in one tap, with
+   `https://t.me/{bot_name}?startgroup&admin=manage_topics+delete_messages`.
+   Offer the link rather than describing permission screens.
+
+So the short path is: the user creates a group and enables Topics, then taps
+that link. The bot learns the group by being added and checks the rest itself.
+
+A working forum is a supergroup with `is_forum`, the bot an administrator, and
+`can_manage_topics`. When one is missing, say which one. "The bot is not an
+admin there" is useful; "setup failed" is not.
+
+`can_delete_messages` is wanted but not required: the deeplink above asks for
+it, and without it Telegram's "changed the topic icon" notices pile up in the
+chat because the bot cannot clear them. A forum missing only that right is
+working, and saying it is broken would be wrong.
+
+## Where work belongs
+
+Work belongs in a session's own topic, which has its own agent, directory and
+transcript. This chat has none of those, so when the user wants work done, help
+them get a forum and suggest a topic for it.
+
+That is a preference, not a prohibition. If the forum is broken and this is the
+only channel left, repairing FalconFox from here is what this chat is for.
+"""
 
 
 # The commands, in three sections plus a preamble. One text, identical in
@@ -457,10 +572,15 @@ class FalconFoxTelegramBot:
         self._infra_file = self.state_dir.joinpath("infra.json")
         self._learned_forum: int | None = None
         self._bot_username: str | None = None
+        # Directories for the two infrastructure sessions to run in. Nothing
+        # is written into them any more -- orientation reaches a session
+        # through its first prompt -- but a session still needs a cwd.
+        self.manager_workspace = self.state_dir
+        self.concierge_workspace = self.state_dir.joinpath("concierge")
 
     async def run(self) -> None:
         StallWatchdog(logging.getLogger("falconfox.telegram.watchdog")).start()
-        self._prepare_manager_workspace()
+        self._register_orientation()
         self._load_forum()
         self._load_infra()
         self._load_topics()
@@ -484,6 +604,10 @@ class FalconFoxTelegramBot:
         snapshot = json.loads(await websocket.recv())
         if snapshot.get("type") != "snapshot":
             raise RuntimeError("FalconFox did not send an initial snapshot")
+        # On every connection, because the client directory is named after the
+        # daemon's process: a daemon we have just (re)connected to may be a
+        # different one, reading a directory this bot has never written to.
+        self._register_orientation()
         # Announced on every connection, not only on a reconnect: a deploy
         # restarts the bot too, so the process that saw the daemon go down is
         # rarely the one that sees it return. A bare "up" after a bot-only
@@ -731,137 +855,52 @@ class FalconFoxTelegramBot:
         )
 
 
-    def _prepare_workspace(self, root: Path, orientation: str) -> None:
-        """Write the workspace an infrastructure session runs in.
+    def _register_orientation(self) -> None:
+        """Write this client's orientation where the daemon reads it.
 
-        Its whole content is the orientation, in both files so that every agent
-        runtime picks it up natively. Skills used to live here too and no
-        longer do: a file is read whether or not an agent judges a skill
-        relevant, and these two sessions have exactly one job each to describe.
+        Written on every start *and* every reconnect: the directory is named
+        after the daemon's process, so a daemon restart moves it and a client
+        that wrote only once would leave its orientation somewhere nothing
+        reads any more.
+
+        The daemon takes the namespace from the directory name, so what makes
+        this Telegram's `concierge` rather than anyone else's is where the file
+        is, not anything the file claims.
         """
-        root.mkdir(parents=True, exist_ok=True)
-        root.joinpath("AGENTS.md").write_text(orientation)
-        root.joinpath("CLAUDE.md").write_text(orientation)
+        root = self._clients_dir()
+        if root is None:
+            return
+        mine = root.joinpath("telegram")
+        try:
+            mine.joinpath("roles").mkdir(parents=True, exist_ok=True)
+            _write_atomic(mine.joinpath("orientation.md"), CLIENT_ORIENTATION)
+            _write_atomic(mine.joinpath("roles", "concierge.md"),
+                          self._concierge_orientation())
+        except OSError:
+            log.warning("could not write orientation to %s -- sessions will "
+                        "spawn without it", mine, exc_info=True)
+            return
+        log.info("orientation registered at %s", mine)
 
-    def _prepare_manager_workspace(self) -> None:
-        orientation = """# FalconFox session manager
+    def _clients_dir(self) -> Optional[Path]:
+        """This daemon run's client directory, as the daemon published it."""
+        info = falconfox_state.read_server_info()
+        directory = getattr(info, "clients_dir", None) if info else None
+        if not directory:
+            log.warning("the daemon published no client directory; sessions "
+                        "will spawn without Telegram orientation")
+            return None
+        return Path(directory)
 
-FalconFox is a daemon that runs agent sessions, each with its own working
-directory and transcript. This forum is one of its clients: every session gets
-a topic here, and the user talks to a session by writing in that topic. You are
-the manager, in General, and what belongs to you is the session lifecycle -
-spawning, renaming, stopping, deleting.
+    def _concierge_orientation(self) -> str:
+        """Everything the private chat needs.
 
-**Spawning.** `falconfox spawn --path <path> [--name <name>] [--backend
-<name>]`. The bot notices the new session and gives it a topic; you never
-create topics yourself. `--backend` picks which agent runs it, from the
-backends in the user's config. Run `falconfox spawn --help` for the current
-flags, and pass a requested model or backend through rather than saying it
-cannot be done.
-
-**Identifying a session.** `falconfox list` gives id, name, path and state.
-References are often spoken and fuzzy, so pick the closest match and say which
-one you chose. When a topic is genuinely ambiguous, `/id` sent in it answers
-with its session id, which is the cheap way to ask. Every session also knows
-its own id, from FALCONFOX_SESSION_ID in its environment, but asking the agent
-costs a turn. Offer a rename if you encounter an ambiguous request and cannot
-definitively identify a session.
-
-**Managing.** `falconfox rename <id> <name>` retitles the topic with it.
-`falconfox stop <id>` shuts the agent down and frees the slot it holds; the
-session keeps its transcript and wakes on its next message, which is how a busy
-forum stays under the live-session limit. `falconfox delete <id>` discards the
-session and removes its topic. Stopping a session that was never used deletes
-it instead, since there is nothing to keep.
-
-**Tags.** `falconfox tag <id> <tags...>` labels a session, and `falconfox
-list` shows the labels. Tags mean nothing to FalconFox: they are the user's
-own vocabulary, so take them as given rather than proposing a scheme, and do
-not act on one unless the user has told you what it means to them.
-
-Two mechanics matter. The call **replaces** the whole list, so carry the
-existing tags forward when adding one, and `falconfox tag <id>` with no tags
-clears them. And the **order is meaningful**: the user may have configured a
-topic icon per tag, and the first tag with an icon is the one shown, so
-preserve the order you were given and do not reorder tags on your own.
-
-**Be certain of the target before deleting.** There is no undo, and messages
-here may have been transcribed from speech, so a reference you half-recognise
-is worth reading back first; an unambiguous one is not. The daemon refuses to
-let a session stop or delete itself, so you cannot end this chat by accident.
-
-Project work belongs in a session's own topic, where it has an agent, a
-directory and a transcript of its own. Point the user there rather than doing
-it here. When greeting or unsure, ask what they want.
-"""
-        self.manager_workspace = self.state_dir
-        self._prepare_workspace(self.manager_workspace, orientation)
-
-    def _prepare_concierge_workspace(self) -> None:
-        """Everything the private chat needs, in the one file it reads.
-
-        Split across an orientation and a skill, the orientation existed mostly
-        to point at the skill. One file is read whether or not the agent
-        decides a skill is relevant, which for the channel of last resort is
-        the property that matters.
+        Telegram-specific and whole on purpose. This is the channel that has to
+        work *before* a forum exists, so what it repeats from the client
+        orientation is the point rather than an oversight.
         """
         bot_name = self._bot_username or "your_bot"
-        orientation = f"""# FalconFox private chat
-
-FalconFox is a daemon that runs agent sessions and connects them to a Telegram
-forum, where each session gets its own topic and the user talks to it by
-writing there. You are the private chat: the one channel that needs no
-configuration, so it is where the user arrives before a forum exists, and
-where they come back if the forum breaks. It is also the general help and meta
-channel.
-
-Read what the user actually wants: set things up when they want to start,
-diagnose when they report something wrong, answer when they ask. Most messages
-here are about none of those, so do not sweep for problems on every one.
-
-## Find out rather than assume
-
-FalconFox moves fast, so anything written here about its current state would be
-stale before you read it. Run `falconfox` commands, ask Telegram, and say what
-you found.
-
-## Three things you cannot discover by looking
-
-Facts about Telegram, not about this deployment:
-
-1. A bot cannot create a group, and cannot enable Topics. Both are the user's
-   to do; everything after them can be automated. Never imply otherwise.
-2. Topics must be enabled *before* the bot is added. Enabling them upgrades the
-   group to a supergroup and changes its chat id, so a bot added first holds an
-   id that goes stale moments later. This is the most likely way a setup
-   silently half-works.
-3. The bot can be added already promoted, in one tap, with
-   `https://t.me/{bot_name}?startgroup&admin=manage_topics+delete_messages`.
-   Offer the link rather than describing permission screens.
-
-So the short path is: the user creates a group and enables Topics, then taps
-that link. The bot learns the group by being added and checks the rest itself.
-
-A working forum is a supergroup with `is_forum`, the bot an administrator, and
-`can_manage_topics`. When one is missing, say which one. "The bot is not an
-admin there" is useful; "setup failed" is not.
-
-`can_delete_messages` is wanted but not required: the deeplink above asks for
-it, and without it Telegram's "changed the topic icon" notices pile up in the
-chat because the bot cannot clear them. A forum missing only that right is
-working, and saying it is broken would be wrong.
-
-## Where work belongs
-
-Work belongs in a session's own topic, which has its own agent, directory and
-transcript. This chat has none of those, so when the user wants work done, help
-them get a forum and suggest a topic for it.
-
-That is a preference, not a prohibition. If the forum is broken and this is the
-only channel left, repairing FalconFox from here is what this chat is for.
-"""
-        self.concierge_workspace = self.state_dir.joinpath("concierge")
-        self._prepare_workspace(self.concierge_workspace, orientation)
+        return CONCIERGE_ORIENTATION.replace("{bot_name}", bot_name)
 
     async def _ensure_manager(self) -> str | None:
         """The manager session, spawned on demand.
@@ -876,9 +915,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
         if self.forum_chat_id is None:
             return None
         try:
-            # The workspace is normally built at startup; an adopted forum can
-            # reach here first, so make sure it exists before spawning into it.
-            self._prepare_manager_workspace()
+            self.manager_workspace.mkdir(parents=True, exist_ok=True)
             await self._spawn_manager_session()
         except ApiError:
             log.warning("could not spawn the manager session", exc_info=True)
@@ -892,6 +929,7 @@ only channel left, repairing FalconFox from here is what this chat is for.
         session = await self.daemon.spawn(
             path=str(self.manager_workspace), name="telegram manager",
             backend=self.config.manager_backend, hidden=True,
+            roles=[".manager"],
         )
         self.manager_session_id = session["session_id"]
         self._persist_infra()
@@ -910,11 +948,12 @@ only channel left, repairing FalconFox from here is what this chat is for.
                 self._bot_username = (await self.telegram.call("getMe") or {}).get("username")
             except ApiError:
                 log.warning("could not read the bot username", exc_info=True)
-        self._prepare_concierge_workspace()
+        self.concierge_workspace.mkdir(parents=True, exist_ok=True)
         try:
             session = await self.daemon.spawn(
                 path=str(self.concierge_workspace), name="telegram private chat",
                 backend=self.config.manager_backend, hidden=True,
+                roles=["telegram.concierge"],
             )
         except ApiError:
             log.warning("could not spawn the private-chat session", exc_info=True)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import socket
 import time
@@ -38,6 +39,48 @@ def server_info_path() -> Path:
     return state_dir().joinpath(SERVER_INFO_FILENAME)
 
 
+def runtime_dir() -> Path:
+    """``$XDG_RUNTIME_DIR/falconfox``, falling back to the state directory.
+
+    Only the fallback is durable, and that is the wrong property here: the run
+    directory below wants to disappear on reboot, since nothing in it outlives
+    the daemon that published it.
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    return Path(base).joinpath("falconfox") if base else state_dir()
+
+
+def clients_dir(pid: Optional[int] = None) -> Path:
+    """Where clients write their orientation, for this daemon run.
+
+    A directory per run, rather than one shared directory that has to be swept:
+    when the daemon restarts, everything a departed client left behind stays in
+    a directory nothing will read again. Staleness stops being a thing to
+    manage and becomes a thing that cannot happen.
+
+    The daemon publishes this path in server.json, which is what lets clients
+    find a directory named after a process that did not exist when they were
+    written.
+    """
+    return runtime_dir().joinpath(f"run-{pid or os.getpid()}", "clients")
+
+
+def prepare_clients_dir() -> Path:
+    """Create this run's client directory and drop every other run's.
+
+    Removing siblings is safe because those runs are over -- a run directory is
+    only ever written by clients of the daemon that published it, and that
+    daemon is gone. It keeps a long-lived tmpfs from collecting one directory
+    per restart.
+    """
+    directory = clients_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    for sibling in directory.parent.parent.glob("run-*"):
+        if sibling != directory.parent and sibling.is_dir():
+            shutil.rmtree(sibling, ignore_errors=True)
+    return directory
+
+
 def log_path() -> Path:
     """Unified daemon log: structured events plus raw crash/uvicorn output."""
     return state_dir().joinpath(LOG_FILENAME)
@@ -48,6 +91,7 @@ class ServerInfo:
     pid: int
     port: int
     started: str
+    clients_dir: Optional[str] = None
 
 
 def write_server_info(port: int) -> Path:
@@ -59,6 +103,9 @@ def write_server_info(port: int) -> Path:
         "pid": os.getpid(),
         "port": port,
         "started": datetime.now(timezone.utc).isoformat(),
+        # Published rather than agreed in advance: the directory is named
+        # after this process, so a client has no way to work it out alone.
+        "clients_dir": str(clients_dir()),
     }
     path.write_text(json.dumps(info))
     return path
@@ -71,7 +118,9 @@ def read_server_info() -> Optional[ServerInfo]:
         return None
     try:
         data = json.loads(path.read_text())
-        return ServerInfo(pid=data["pid"], port=data["port"], started=data["started"])
+        return ServerInfo(pid=data["pid"], port=data["port"],
+                          started=data["started"],
+                          clients_dir=data.get("clients_dir"))
     except (json.JSONDecodeError, KeyError, OSError) as error:
         log.debug("ignoring unreadable server info %s: %s", path, error)
         return None

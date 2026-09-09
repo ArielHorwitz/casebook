@@ -16,7 +16,7 @@ import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional, Sequence
 
 from acp import PROTOCOL_VERSION, spawn_agent_process, text_block
 from acp.interfaces import ClientCapabilities, Implementation
@@ -61,6 +61,23 @@ class _TurnStats:
         elif event_type == "tool_call":
             # Updates reuse the id; count calls, not status changes.
             self.tool_call_ids.add(event.get("tool_call_id"))
+
+
+class PromptPart(NamedTuple):
+    """One block of a prompt, and what becomes of it besides being sent.
+
+    `system` marks text that is not the user's own words. Clients hide it --
+    the flag is ours, not ACP's, which has no notion of a system turn.
+
+    `record` is whether it belongs in the session's transcript. Orientation
+    does: everything a session is told is part of its history. A replay of the
+    transcript itself does not, or every resume would fold the previous
+    transcript into the next one.
+    """
+
+    text: str
+    system: bool = False
+    record: bool = True
 
 
 @dataclass
@@ -211,14 +228,13 @@ class AgentSession:
         self._set_state("idle")
         return False
 
-    async def send(
-        self, text: str, *, system: bool = False, display_text: Optional[str] = None
-    ) -> None:
+    async def send(self, parts: Sequence[PromptPart]) -> None:
         """Run one prompt turn. Rejected (with a notice) while a turn is active.
 
-        `display_text` (when given) is what the UI shows for the user turn, while
-        `text` is what the agent actually receives — used to attach hidden context
-        (e.g. a re-sent transcript) without dumping it into the visible transcript.
+        A prompt is an array of blocks, so what the agent receives is the parts
+        as they are, in order, rather than one string with everything glued
+        into it. That is what stops one producer of context overwriting or
+        silently absorbing another.
         """
         if self._busy:
             self._notify("agent is still responding; wait for the current turn")
@@ -227,23 +243,27 @@ class AgentSession:
         turn = _TurnStats(turn_id=uuid.uuid4().hex[:8])
         self._turn = turn
         outcome, stop_reason = "completed", None
-        self.emit(
-            {
-                "session_id": self.session_id,
-                "type": "message",
-                "role": "user",
-                "text": display_text if display_text is not None else text,
-                "system": system,
-            }
-        )
+        for part in parts:
+            if not part.record:
+                continue
+            self.emit(
+                {
+                    "session_id": self.session_id,
+                    "type": "message",
+                    "role": "user",
+                    "text": part.text,
+                    "system": part.system,
+                }
+            )
         self.emit(
             {"session_id": self.session_id, "type": "turn_started",
-             "turn_id": turn.turn_id, "prompt_chars": len(text)}
+             "turn_id": turn.turn_id,
+             "prompt_chars": sum(len(part.text) for part in parts)}
         )
         self._set_state("working")
         try:
             response = await self._conn.prompt(
-                prompt=[text_block(text)],
+                prompt=[text_block(part.text) for part in parts],
                 session_id=self._acp_session_id,
                 message_id=str(uuid.uuid4()),
             )

@@ -7,13 +7,13 @@ import datetime
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
-from . import config, logsetup, storage
+from . import config, logsetup, state, storage
 from .engine import oneshot
 from .engine.client import resolve_config_value
 from .engine.events import EventBus
-from .engine.session import AgentSession, SessionManager
+from .engine.session import AgentSession, PromptPart, SessionManager
 from .errors import FalconFoxError
 
 _REPLAYABLE = {"message", "tool_call", "notice", "plan", "usage"}
@@ -81,7 +81,7 @@ class SessionCoordinator:
         self._acp_ids: dict[str, Optional[str]] = {}
         self._config_options: dict[str, list[dict]] = {}
         self._commands: dict[str, list[dict]] = {}
-        self._pending_context: dict[str, str] = {}
+        self._pending_context: dict[str, list[PromptPart]] = {}
         # In-flight `attach` calls, keyed by request id. The daemon cannot send
         # a file itself -- only the client attached to the chat can -- so the
         # HTTP call waits here until that client reports back.
@@ -115,6 +115,8 @@ class SessionCoordinator:
                 # listing and starts competing as if it were the user's.
                 "hidden": bool(meta.get("hidden")),
                 "tags": _normalize_tags(meta.get("tags") or []),
+                "roles": list(meta.get("roles") or []),
+                "oriented": bool(meta.get("oriented")),
                 "state": "stored",
                 "live": False,
                 "created": meta.get("created"),
@@ -243,6 +245,12 @@ class SessionCoordinator:
             "acp_session_id": self._acp_ids.get(session_id),
             "hidden": bool(meta.get("hidden")),
             "tags": meta.get("tags") or [],
+            # Roles decide the orientation, and `oriented` decides whether it
+            # is still owed. Both have to survive a restart or a session that
+            # was created and not yet spoken to would come back either
+            # unoriented forever or oriented as something it is not.
+            "roles": list(meta.get("roles") or []),
+            "oriented": bool(meta.get("oriented")),
             "created": meta.get("created"),
             "last_active": meta.get("last_active") or _now_iso(),
         })
@@ -305,6 +313,7 @@ class SessionCoordinator:
         backend_name: Optional[str] = None,
         ephemeral: bool = False,
         hidden: Optional[bool] = None,
+        roles: Optional[Sequence[str]] = None,
     ) -> str:
         working_path = Path(path or Path.home()).expanduser().resolve()
         if not working_path.is_dir():
@@ -323,11 +332,6 @@ class SessionCoordinator:
         # A throwaway is hidden by default; infrastructure asks for hidden
         # without asking to be thrown away.
         hidden = bool(ephemeral) if hidden is None else bool(hidden)
-        # Every session gets told what it is running inside, on its first
-        # message rather than at spawn: there is no channel to an agent that
-        # has not been prompted, so the first prompt is the earliest moment
-        # this can be said at all.
-        self._pending_context[session_id] = config.SESSION_CONTEXT
         has_slot = await self._ensure_slot(infrastructure=hidden)
         now = _now_iso()
         if not has_slot:
@@ -339,6 +343,8 @@ class SessionCoordinator:
                 "always_allow": True, "ephemeral": bool(ephemeral),
                 "hidden": hidden,
                 "tags": [],
+                "roles": list(roles or []),
+                "oriented": False,
                 "state": "stored", "live": False, "created": now, "last_active": now,
             }
             self._persist_meta(session_id)
@@ -365,6 +371,8 @@ class SessionCoordinator:
             "ephemeral": bool(ephemeral),
             "hidden": hidden,
             "tags": [],
+            "roles": list(roles or []),
+            "oriented": False,
             "state": "starting",
             "live": True,
             "created": now,
@@ -552,14 +560,112 @@ class SessionCoordinator:
         self._emit({"type": "transcript_reset", "session_id": session_id,
                     "transcript": transcript})
         if not loaded and transcript:
-            # Replaces any unsent session context, which is not a loss: the
-            # transcript being re-sent contains it already if it was ever
-            # delivered, and a session with a transcript has had its first
-            # message.
-            self._pending_context[session_id] = self._context_prompt(session_id)
+            # Appended, not substituted. The orientation this session has
+            # not received yet is still owed to it, and a transcript cannot
+            # stand in for it: `record=False` keeps replays out of the
+            # transcript, so a replay never contains one.
+            self._pending_context.setdefault(session_id, []).append(
+                PromptPart(text=self._context_prompt(session_id),
+                           system=True, record=False))
             self._emit({"type": "notice", "session_id": session_id,
                         "message": "Context re-sent from saved transcript imperfectly — "
                                    "this backend has no native session loading."})
+
+    def _orientation_parts(self, session_id: str) -> list[PromptPart]:
+        """A session's orientation, once, on the first prompt it ever gets.
+
+        Built here rather than queued at spawn, and the difference matters: a
+        session created and not yet spoken to would otherwise lose its
+        orientation to a daemon restart, because the queue is in memory while
+        the session is on disk. What is persisted instead is the fact that it
+        has been told -- which also means the roles are read back from
+        metadata, so a restart rebuilds exactly the same text.
+        """
+        meta = self._metadata.get(session_id) or {}
+        if meta.get("oriented"):
+            return []
+        parts = [PromptPart(text=piece, system=True)
+                 for piece in self._orientation(meta.get("roles") or [])]
+        meta["oriented"] = True
+        self._persist_meta(session_id)
+        return parts
+
+    def _orientation(self, roles: Sequence[str]) -> list[str]:
+        """The pieces a session is told about itself, in reading order.
+
+        Global first, then every client registered for this daemon run, then
+        the text for each role the session holds. Client orientations are
+        unconditional: a session may be started in one client and spoken to
+        through another later, so it needs all of them whatever it is talking
+        to right now. A role's text is conditional on holding the role.
+        """
+        clients = self._client_registrations()
+        pieces = [config.SESSION_CONTEXT]
+        pieces += [entry["orientation"] for _, entry in sorted(clients.items())
+                   if entry["orientation"]]
+        for role in roles:
+            piece = self._role_orientation(role, clients)
+            if piece:
+                pieces.append(piece)
+            else:
+                # Loud, because a role with no text is a session that believes
+                # it has a job nobody described to it.
+                self.log.warning("no orientation registered for role %r", role)
+        return pieces
+
+    def _role_orientation(self, role: str, clients: dict) -> Optional[str]:
+        """Resolve `telegram.concierge`, or `.manager` for the daemon's own.
+
+        The namespace is the client that registered the role, so two clients
+        can both offer a "concierge" without meeting. A bare name with no dot
+        is read as the daemon's, which makes `--role manager` work as well as
+        `--role .manager`.
+        """
+        namespace, _, name = role.rpartition(".")
+        if not namespace:
+            return config.ROLE_ORIENTATIONS.get(name)
+        return (clients.get(namespace) or {}).get("roles", {}).get(name)
+
+    def _client_registrations(self) -> dict[str, dict]:
+        """What each client wrote for this daemon run.
+
+        Read per spawn, not once at startup, because the daemon starts before
+        its clients do -- the Telegram unit is `After=falconfox-daemon` -- so a
+        single read at startup would find an empty directory on every boot.
+
+        A client's directory name is its namespace, so nothing here has to
+        trust a name a client declared for itself.
+        """
+        registrations: dict[str, dict] = {}
+        root = state.clients_dir()
+        if not root.is_dir():
+            return registrations
+        for client in sorted(root.iterdir()):
+            if not client.is_dir():
+                continue
+            roles = {}
+            roles_dir = client.joinpath("roles")
+            if roles_dir.is_dir():
+                for role_file in sorted(roles_dir.glob("*.md")):
+                    roles[role_file.stem] = self._read_orientation(role_file)
+            registrations[client.name] = {
+                "orientation": self._read_orientation(client.joinpath("orientation.md")),
+                "roles": {name: body for name, body in roles.items() if body},
+            }
+        return registrations
+
+    def _read_orientation(self, path: Path) -> str:
+        """A registration file, or "" if it is missing or unreadable.
+
+        Never fatal: a client that wrote nonsense should cost its own
+        orientation, not every spawn on the daemon.
+        """
+        try:
+            return path.read_text().strip()
+        except OSError:
+            self.log.warning("could not read client orientation %s", path,
+                             exc_info=True)
+            return ""
 
     def _context_prompt(self, session_id: str) -> str:
         body = self._transcript_text(session_id, limit=24000)
@@ -585,12 +691,12 @@ class SessionCoordinator:
                 self._enqueue(session_id, text)
                 return
             raise FalconFoxError(f"could not resume session: {session_id}")
-        pending = self._pending_context.pop(session_id, None)
-        if pending:
-            await session.send(f"{pending}\n\n=== the user's message follows ===\n{text}",
-                               display_text=text)
-        else:
-            await session.send(text)
+        # Orientation first, then anything else pending, then the user's
+        # words -- each its own block, so no producer can displace another.
+        parts = self._orientation_parts(session_id)
+        parts += self._pending_context.pop(session_id, [])
+        parts.append(PromptPart(text=text))
+        await session.send(parts)
 
     async def attach(self, session_id: str, path: str,
                      caption: Optional[str] = None, ack: bool = True,
@@ -780,9 +886,16 @@ class SessionCoordinator:
             self.rename_session(session_id, name)
 
     def _transcript_text(self, session_id: str, limit: int = 6000) -> str:
+        """The conversation as text, for a backend that cannot reload it.
+
+        System messages are included, which they were not before. They are the
+        orientation, delivered in the user's turn and part of what this
+        session was told, so a replay that dropped them would hand the agent
+        its history with the explanation of where it is removed.
+        """
         lines = []
         for event in self._ensure_transcript(session_id):
-            if event.get("type") != "message" or event.get("system"):
+            if event.get("type") != "message":
                 continue
             if event.get("role") in ("user", "agent"):
                 lines.append(f"{event['role']}: {event.get('text', '')}")

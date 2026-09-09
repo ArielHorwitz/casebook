@@ -19,9 +19,10 @@ from unittest.mock import patch
 from falconfox.cli import CliError, _guard_self_target, build_parser, cmd_daemon
 from falconfox import __version__ as falconfox_version
 from falconfox import config, get_version
+from falconfox import state as falconfox_state
 from falconfox.coordinator import SessionCoordinator
 from falconfox.errors import FalconFoxError
-from falconfox.engine.session import AgentSession
+from falconfox.engine.session import AgentSession, PromptPart
 from falconfox.storage import SessionStore
 from falconfox.watchdog import StallWatchdog
 from falconfox_telegram.api import ApiError, _json_request
@@ -31,7 +32,7 @@ from falconfox_telegram.bot import (QUEUED_FIRST, REACT_QUEUED, REACT_RECEIVED,
                                     TURN_ACTIONS, BotConfig, FalconFoxTelegramBot)
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
 from falconfox_telegram.bot import (COMMANDS, PHOTO_LIMIT_BYTES, SECTIONS,
-                                    _inline_code, _upload_kind)
+                                    _inline_code, _upload_kind, _write_atomic)
 from falconfox_telegram.shell import ShellRunner, tail
 
 
@@ -293,7 +294,7 @@ class EngineTurnTests(unittest.IsolatedAsyncioTestCase):
                 return Response()
 
         session._conn = FakeConn()
-        await session.send("hi")
+        await session.send([PromptPart(text="hi")])
         types = [event["type"] for event in events]
         started = next(event for event in events if event["type"] == "turn_started")
         ended = next(event for event in events if event["type"] == "turn_ended")
@@ -320,7 +321,7 @@ class EngineTurnTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("backend fell over")
 
         session._conn = BrokenConn()
-        await session.send("hi")
+        await session.send([PromptPart(text="hi")])
         ended = next(event for event in events if event["type"] == "turn_ended")
         self.assertEqual(ended["outcome"], "error")
         self.assertEqual(ended["output_chars"], 0)
@@ -1322,7 +1323,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
 
             class _Daemon:
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     spawned.append(name)
                     return {"session_id": "mgr", "name": name}
             bot.daemon = _Daemon()
@@ -1410,7 +1411,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
 
             class _Daemon:
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     spawned.append((path, name))
                     return {"session_id": "new1", "name": name}
             bot.daemon = _Daemon()
@@ -1462,7 +1463,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
                     return []
 
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     return {"session_id": "mgr", "name": name}
             bot.daemon = _Daemon()
             await bot._handle_update({"my_chat_member": {
@@ -1526,7 +1527,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
 
             class _Daemon:
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     spawned.append(name)
                     return {"session_id": "concierge", "name": name}
             bot.daemon = _Daemon()
@@ -1564,7 +1565,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
                     raise ApiError("no such session")
 
                 async def spawn(self, path, name=None, backend=None,
-                                ephemeral=False, hidden=None):
+                                ephemeral=False, hidden=None, roles=None):
                     spawns.append(name)
                     return {"session_id": "fresh", "name": name}
             bot.daemon = _Daemon()
@@ -1583,7 +1584,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
                     raise ApiError("none")
 
                 async def spawn(self, path, name=None, backend=None,
-                                ephemeral=False, hidden=None):
+                                ephemeral=False, hidden=None, roles=None):
                     kwargs.update(ephemeral=ephemeral, hidden=hidden)
                     return {"session_id": "x", "name": name}
             bot.daemon = _Daemon()
@@ -1600,7 +1601,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
                     return {"session_id": session_id}
 
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     spawns.append(name)
                     return {"session_id": "concierge", "name": name}
             bot.daemon = _Daemon()
@@ -1624,7 +1625,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
 
             class _Daemon:
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
-                                hidden=None):
+                                hidden=None, roles=None):
                     return {"session_id": "concierge", "name": name}
             bot.daemon = _Daemon()
             forwarded = []
@@ -1780,56 +1781,133 @@ class SessionContextTests(unittest.IsolatedAsyncioTestCase):
             self.session_id = session_id
             self.sent = []
 
-        async def send(self, text, display_text=None):
-            self.sent.append((text, display_text))
+        async def send(self, parts):
+            self.sent.append(list(parts))
 
-    def _coordinator(self, directory, session):
+    def _coordinator(self, directory, session, roles=None):
         coordinator = SessionCoordinator(Path(directory))
-        coordinator._metadata[session.session_id] = {"session_id": session.session_id}
+        coordinator._metadata[session.session_id] = {
+            "session_id": session.session_id, "name": "fake", "path": directory,
+            "backend": "fake", "roles": list(roles or []), "oriented": False,
+        }
         coordinator.sessions.add(session)
         return coordinator
 
-    async def test_the_first_message_carries_the_context_and_the_next_does_not(self):
+    async def test_the_first_message_carries_orientation_and_the_next_does_not(self):
         with tempfile.TemporaryDirectory() as directory:
             session = self.FakeSession()
             coordinator = self._coordinator(directory, session)
-            coordinator._pending_context[session.session_id] = config.SESSION_CONTEXT
 
             await coordinator.send(session.session_id, "hello")
             await coordinator.send(session.session_id, "again")
 
             first, second = session.sent
-            self.assertIn("FalconFox session context", first[0])
-            self.assertIn("the user's message follows", first[0])
-            self.assertTrue(first[0].endswith("hello"))
-            # The transcript shows only what the user typed, both times.
-            self.assertEqual(first[1], "hello")
-            self.assertNotIn("FalconFox session context", second[0])
+            # Its own block, not glued to the front of what the user typed.
+            self.assertIn("FalconFox session context", first[0].text)
+            self.assertTrue(first[0].system)
+            self.assertEqual(first[-1].text, "hello")
+            self.assertFalse(first[-1].system)
+            self.assertEqual([part.text for part in second], ["again"])
 
-    async def test_every_new_session_is_given_it(self):
-        # Including the manager and the private chat, which are sessions like
-        # any other and just as unable to discover this for themselves.
+    async def test_orientation_is_still_owed_after_a_daemon_restart(self):
+        # Queued at spawn it would be lost, because the queue is in memory
+        # while the session is on disk. What persists instead is the fact that
+        # the session has not been told yet.
         with tempfile.TemporaryDirectory() as directory:
             coordinator = SessionCoordinator(Path(directory))
             with patch.object(coordinator, "_ensure_slot", return_value=False):
-                session_id = await coordinator.add_session(path=directory, hidden=True)
-            self.assertEqual(coordinator._pending_context[session_id],
-                             config.SESSION_CONTEXT)
+                # Named, so it persists at all: an unnamed session with no
+                # messages does not survive a restart in the first place.
+                session_id = await coordinator.add_session(
+                    path=directory, name="manager", hidden=True,
+                    roles=[".manager"])
+            self.assertFalse(coordinator._metadata[session_id]["oriented"])
 
-    async def test_a_resume_that_re_sends_a_transcript_wins(self):
-        # Both want the same slot. The transcript is the one that matters: it
-        # already contains the context if it was ever delivered.
+            restarted = SessionCoordinator(Path(directory))
+            restarted.load_persisted()
+            self.assertFalse(restarted._metadata[session_id].get("oriented"))
+            self.assertEqual(restarted._metadata[session_id]["roles"], [".manager"])
+
+    async def test_a_role_adds_its_own_piece(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.FakeSession()
+            coordinator = self._coordinator(directory, session, roles=[".manager"])
+            await coordinator.send(session.session_id, "hello")
+            pieces = [part.text for part in session.sent[0]]
+            self.assertIn(config.SESSION_CONTEXT, pieces)
+            self.assertIn(config.MANAGER_ORIENTATION, pieces)
+            # Global first, then the role, then the user.
+            self.assertLess(pieces.index(config.SESSION_CONTEXT),
+                            pieces.index(config.MANAGER_ORIENTATION))
+            self.assertEqual(pieces[-1], "hello")
+
+    async def test_an_unknown_role_is_a_warning_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.FakeSession()
+            coordinator = self._coordinator(directory, session,
+                                            roles=["nobody.nothing"])
+            with self.assertLogs("falconfox.coordinator", level="WARNING") as logged:
+                await coordinator.send(session.session_id, "hello")
+            self.assertIn("nobody.nothing", "".join(logged.output))
+            self.assertEqual(session.sent[0][-1].text, "hello")
+
+    async def test_a_resume_adds_the_transcript_without_displacing_orientation(self):
+        # Both want the same queue. Appending rather than replacing is what
+        # stops a resumed session losing the explanation of where it is.
         with tempfile.TemporaryDirectory() as directory:
             session = self.FakeSession()
             coordinator = self._coordinator(directory, session)
-            coordinator._pending_context[session.session_id] = config.SESSION_CONTEXT
             coordinator._transcripts[session.session_id] = [
                 {"type": "message", "role": "user", "text": "earlier"}]
-            coordinator._pending_context[session.session_id] = \
-                coordinator._context_prompt(session.session_id)
+            coordinator._pending_context[session.session_id] = [
+                PromptPart(text=coordinator._context_prompt(session.session_id),
+                           system=True, record=False)]
 
             await coordinator.send(session.session_id, "hello")
-            self.assertIn("resuming a previous session", session.sent[0][0])
+            texts = [part.text for part in session.sent[0]]
+            self.assertIn(config.SESSION_CONTEXT, texts)
+            self.assertTrue(any("resuming a previous session" in text
+                                for text in texts))
+
+    async def test_a_transcript_replay_stays_out_of_the_transcript(self):
+        # Otherwise every resume folds the previous transcript into the next
+        # one, and they grow without bound.
+        with tempfile.TemporaryDirectory() as directory:
+            events = []
+            session = AgentSession(
+                session_id="s", name="n", path=Path(directory), backend=None,
+                emit=events.append, request_permission=None,
+            )
+            session._acp_session_id = "acp"
+
+            class FakeConn:
+                async def prompt(self, **_kwargs):
+                    class Response:
+                        stop_reason = "end_turn"
+                        usage = None
+                    return Response()
+
+            session._conn = FakeConn()
+            await session.send([
+                PromptPart(text="orientation", system=True),
+                PromptPart(text="a replay", system=True, record=False),
+                PromptPart(text="hello"),
+            ])
+            recorded = [event["text"] for event in events
+                        if event.get("type") == "message"]
+            self.assertEqual(recorded, ["orientation", "hello"])
+
+    async def test_the_transcript_replay_includes_orientation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = SessionCoordinator(Path(directory))
+            coordinator._transcripts["s"] = [
+                {"type": "message", "role": "user", "text": "the orientation",
+                 "system": True},
+                {"type": "message", "role": "user", "text": "hello"},
+            ]
+            replayed = coordinator._transcript_text("s")
+            self.assertIn("the orientation", replayed)
+            self.assertIn("hello", replayed)
 
 
 class AttachmentTests(unittest.IsolatedAsyncioTestCase):
@@ -1994,33 +2072,116 @@ class AttachmentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Could not send report.txt", bot.telegram.messages[0][1])
 
 
-class WorkspaceTests(unittest.IsolatedAsyncioTestCase):
-    """What the bot writes into a workspace it owns."""
+class ClientRegistrationTests(unittest.IsolatedAsyncioTestCase):
+    """What the bot writes where the daemon reads it, and what it means."""
 
-    def test_the_private_chat_gets_one_file_and_no_skill(self):
+    def _bot(self, directory):
+        return FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
+
+    def test_orientation_and_roles_are_written_under_the_client_name(self):
         with tempfile.TemporaryDirectory() as directory:
-            bot = FalconFoxTelegramBot(BotConfig(
-                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
+            clients = Path(directory).joinpath("clients")
+            clients.mkdir()
+            bot = self._bot(directory)
             bot._bot_username = "a_bot"
-            bot._prepare_concierge_workspace()
-            root = bot.concierge_workspace
-            orientation = root.joinpath("AGENTS.md").read_text()
-            self.assertIn("FalconFox private chat", orientation)
+            with patch.object(bot, "_clients_dir", return_value=clients):
+                bot._register_orientation()
+            # The directory name is the namespace: nothing inside the files
+            # says "telegram", and nothing needs to.
+            mine = clients.joinpath("telegram")
+            self.assertIn("Talking through Telegram",
+                          mine.joinpath("orientation.md").read_text())
+            concierge = mine.joinpath("roles", "concierge.md").read_text()
+            self.assertIn("FalconFox private chat", concierge)
             self.assertIn("https://t.me/a_bot?startgroup&admin=manage_topics",
-                          orientation)
-            # Both files, so every agent runtime picks it up natively.
-            self.assertEqual(root.joinpath("CLAUDE.md").read_text(), orientation)
-            self.assertFalse(root.joinpath(".agents", "skills").exists())
+                          concierge)
 
-    def test_the_manager_gets_one_file_too(self):
+    def test_a_daemon_with_no_client_directory_is_survivable(self):
+        # A client that cannot register should cost its own orientation, not
+        # the bot's startup.
         with tempfile.TemporaryDirectory() as directory:
-            bot = FalconFoxTelegramBot(BotConfig(
-                "token", 7, daemon_url=UNREACHABLE_DAEMON, state_dir=Path(directory)))
-            bot._prepare_manager_workspace()
-            orientation = bot.manager_workspace.joinpath("AGENTS.md").read_text()
-            self.assertIn("FalconFox session manager", orientation)
-            self.assertEqual(
-                bot.manager_workspace.joinpath("CLAUDE.md").read_text(), orientation)
+            bot = self._bot(directory)
+            with patch.object(bot, "_clients_dir", return_value=None):
+                bot._register_orientation()
+
+    def test_a_partial_write_is_never_visible(self):
+        # The daemon reads these on every spawn, so the window matters.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory).joinpath("orientation.md")
+            target.write_text("the old one")
+            seen = []
+
+            original = Path.replace
+
+            def watched(self, other):
+                seen.append(Path(other).read_text())
+                return original(self, other)
+
+            with patch.object(Path, "replace", watched):
+                _write_atomic(target, "the new one")
+            self.assertEqual(seen, ["the old one"])
+            self.assertEqual(target.read_text(), "the new one")
+
+
+class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
+    """How the daemon turns a client directory into a session's orientation."""
+
+    def _write_client(self, clients, name, orientation="", roles=None):
+        root = clients.joinpath(name)
+        root.joinpath("roles").mkdir(parents=True, exist_ok=True)
+        if orientation:
+            root.joinpath("orientation.md").write_text(orientation)
+        for role, body in (roles or {}).items():
+            root.joinpath("roles", f"{role}.md").write_text(body)
+
+    def test_every_client_orientation_reaches_every_session(self):
+        # Unconditional on purpose: a session started in one client may be
+        # spoken to through another later.
+        with tempfile.TemporaryDirectory() as directory:
+            clients = Path(directory).joinpath("clients")
+            self._write_client(clients, "telegram", orientation="about telegram")
+            self._write_client(clients, "web", orientation="about the web")
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir", return_value=clients):
+                pieces = coordinator._orientation([])
+            self.assertIn("about telegram", pieces)
+            self.assertIn("about the web", pieces)
+            # Deterministic order, by directory name.
+            self.assertLess(pieces.index("about telegram"),
+                            pieces.index("about the web"))
+
+    def test_a_role_resolves_through_the_client_that_registered_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clients = Path(directory).joinpath("clients")
+            self._write_client(clients, "telegram", roles={"concierge": "tg setup"})
+            self._write_client(clients, "web", roles={"concierge": "web setup"})
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir", return_value=clients):
+                pieces = coordinator._orientation(["web.concierge"])
+            # Two clients can both offer a "concierge" without meeting.
+            self.assertIn("web setup", pieces)
+            self.assertNotIn("tg setup", pieces)
+
+    def test_the_daemons_own_role_takes_the_empty_namespace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clients = Path(directory).joinpath("clients")
+            clients.mkdir()
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir", return_value=clients):
+                dotted = coordinator._orientation([".manager"])
+                bare = coordinator._orientation(["manager"])
+            self.assertIn(config.MANAGER_ORIENTATION, dotted)
+            # A bare name is read as the daemon's, so --role manager works too.
+            self.assertEqual(dotted, bare)
+
+    def test_a_missing_client_directory_still_yields_the_global_piece(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir",
+                              return_value=Path(directory).joinpath("nope")):
+                self.assertEqual(coordinator._orientation([]),
+                                 [config.SESSION_CONTEXT])
 
 
 class SessionTagTests(unittest.IsolatedAsyncioTestCase):

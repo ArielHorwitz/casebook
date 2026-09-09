@@ -95,7 +95,8 @@ closes it (a closed topic still accepts the bot's writes, so the record and any
 final notice survive), and a delete removes it. You talk to a session by
 writing in its topic, so sessions run in parallel without interfering.
 
-**General** holds the session manager — an ephemeral session with a skill for
+**General** holds the session manager — a session carrying the daemon's own
+`.manager` role, which is what tells it to own the session lifecycle:
 spawning, renaming, stopping and deleting. `/new`, `/list`, `/home` and
 `/status` are explicit fast paths; other General text is resolved naturally
 by the manager agent. `/name` is not among them: it renames the session whose
@@ -111,6 +112,24 @@ Your own message carries what became of it, as a reaction: 👀 queued, 🫡 han
 to the daemon, ✍ being worked on, 👌 finished, 💔 cancelled or dropped, 😱 failed.
 A reaction costs no message, which is the point in a chat where every line is
 clutter on a phone screen.
+
+Every session is told what it is running inside, once, on the first message it
+ever receives. That **orientation** is composed rather than written in one
+place: a global piece about being a FalconFox session, then one piece per
+client that is running, then one piece per *role* the session holds. Roles
+compose and are namespaced by whoever registered them, so `.manager` is the
+daemon's own and `telegram.concierge` is this client's.
+
+A client publishes its own text rather than the daemon carrying it: the daemon
+makes a directory per run, names it in `server.json`, and each client writes
+`<client>/orientation.md` and `<client>/roles/<role>.md` into it on startup and
+on every reconnect. The directory name *is* the namespace, so two clients can
+both offer a "concierge" without colliding, and a client that stops running
+stops describing itself to new sessions.
+
+Orientation is recorded in the session's transcript, marked so clients do not
+display it. Changing it does not reach sessions that already exist, which is
+what `/clear` is for.
 
 A session can carry **tags** - `/tags urgent` in its topic, or `falconfox tag`
 - which are opaque labels that the forum draws as the topic's icon, one per

@@ -41,6 +41,9 @@ def create_app(
         watchdog = StallWatchdog(logsetup.get_logger("watchdog"))
         watchdog.start()
         if write_info:
+            # The directory before the file that advertises it: a client that
+            # reads server.json must find somewhere to write.
+            state.prepare_clients_dir()
             state.write_server_info(bound_port)
         if open_browser:
             import webbrowser
@@ -76,6 +79,7 @@ def create_app(
                 backend_name=body.get("backend"),
                 ephemeral=bool(body.get("ephemeral", False)),
                 hidden=body.get("hidden"),
+                roles=body.get("roles"),
             )
             return JSONResponse(coordinator.get_session(session_id), status_code=201)
         except (FalconFoxError, KeyError, OSError) as error:

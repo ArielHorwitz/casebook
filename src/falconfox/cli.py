@@ -151,6 +151,7 @@ def cmd_spawn(args) -> None:
         "name": args.name,
         "backend": args.backend,
         "ephemeral": args.ephemeral,
+        "roles": args.role or None,
     })
     print(session["session_id"])
 
@@ -261,6 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
     spawn.add_argument("--name")
     spawn.add_argument("--backend")
     spawn.add_argument("--ephemeral", action="store_true")
+    # Repeatable, because roles compose: nothing about running the session
+    # lifecycle conflicts with a session also being something else. Names are
+    # namespaced by whoever registered them -- `telegram.concierge`, or a bare
+    # `.manager` for the daemon's own.
+    spawn.add_argument("--role", action="append", metavar="[client.]role",
+                       help="give the session a role (repeatable)")
     spawn.set_defaults(func=cmd_spawn)
 
     listing = sub.add_parser("list", help="list persisted/non-ephemeral sessions")

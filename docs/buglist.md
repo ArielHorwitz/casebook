@@ -71,6 +71,7 @@ fragility the incident exposed rather than the incident itself.
 
 **The web UI does not work against the flat session model.** Flattening removed
 the case/project navigation it was built on, and it ships unwired. This is a
-deliberate state, not an accident — it is tracked as the desktop-client effort
-in [wishlist.md](wishlist.md), and is listed here only so that finding a broken
-UI does not read as an undiscovered bug.
+deliberate state, not an accident. The standing decision in
+[wishlist.md](wishlist.md) is to delete the assets soon, and possibly repair a
+UI later; it is listed here only so that finding a broken UI does not read as
+an undiscovered bug.

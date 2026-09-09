@@ -7,13 +7,15 @@ bookkeeping into the repository where the agent works.
 
 What is here: the flattened daemon and API, the `falconfox` CLI control plane,
 and a separate two-channel Telegram client, deployed and driven from a phone.
-Telegram is the mobile client; the web assets under `src/falconfox/web/` are
-the desktop client and ship unwired, because flattening the session model
-removed the navigation they were built on.
+Telegram is the only client. The browser UI under `src/falconfox/web/static/`
+is dead: flattening the session model removed the navigation it was built on,
+and it is slated for deletion soon, with a repair possible after that.
+`src/falconfox/web/server.py` is a different thing entirely, and very much
+alive — that module is the daemon's own HTTP and websocket API.
 
 The daemon binds loopback and expects to be reached through a co-located
 client, so remote authentication is not planned — Telegram *is* the remote
-access. Voice input and rewiring the web UI are wanted but deferred; see
+access. Voice input and a real desktop client are wanted but deferred; see
 [docs/wishlist.md](docs/wishlist.md) for those and
 [docs/buglist.md](docs/buglist.md) for what is known broken.
 

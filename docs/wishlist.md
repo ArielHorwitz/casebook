@@ -8,20 +8,38 @@ Keep entries short and honest about status. When something is picked up, delete
 the entry; the reason it was wanted belongs in whatever case takes it on. See
 [buglist.md](buglist.md) for things that are broken rather than missing.
 
-## Desktop client — rewire the web UI onto flat sessions
+## Desktop client — delete the dead web UI soon, maybe repair it later
 
-*From the falconfox pivot case, 2026-08-24.*
+*From the falconfox pivot case, 2026-08-24. Reversed from the phone,
+2026-09-09.*
 
-The web assets under `src/*/web/static/` are the **desktop client**: the
+The assets under `src/falconfox/web/static/` were the desktop client, the
 counterpart to Telegram as the mobile client. Flattening the session model
-(session keyed by id, carrying its path) broke the old case- and
-project-centric navigation, so the UI is shipped unwired.
+(session keyed by id, carrying its path) broke their case- and
+project-centric navigation, and nothing has maintained them since.
 
-Deliberately a separate effort. Telegram is *enough* to dogfood falconfox while
-developing it — that was the standard the pivot set for itself and met, and
-rewiring the UI would have delayed the thing that proved the thesis. The
-assets are kept rather than deleted precisely because a working UI is
-substrate worth re-earning.
+The pivot case kept them rather than deleting them, reasoning that a working
+UI is substrate worth re-earning. That is now reversed. Dead assets in the
+tree are a standing tax: a session that reads them takes them for a live
+client and for a description of how the system is shaped, and neither is
+true. Saying so in [AGENTS.md](../.agents/agents.md) is a patch over the real
+fix, which is to delete them, and to do it soon rather than eventually. Git
+history keeps them recoverable, so a repair stays possible: pull the files back
+and rewire them onto whatever the session model looks like by then. That is
+probably the cheapest route to a UI, and it does not need them sitting in the
+tree in the meantime.
+
+Removal touches the `static/` directory, the `index` route and the `/static`
+mount in `web/server.py`, and `--browser` with its `webbrowser` call in
+`cli.py`. It does **not** touch `web/server.py` otherwise: that module is the
+daemon's HTTP and websocket API, which every client and the CLI depend on. It
+only happens to also mount the static assets.
+
+A desktop client is still wanted, and deleting these files is not a decision
+against one. Telegram is *enough* to dogfood falconfox while developing it —
+the standard the pivot set for itself and met — so a browser UI stays deferred
+on its own merits rather than because there is a stale draft of it lying
+around.
 
 ## Voice input
 

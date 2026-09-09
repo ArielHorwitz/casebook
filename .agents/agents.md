@@ -15,6 +15,23 @@ Ignoring this is cheap to do and expensive to find: the divergence surfaces
 much later as a merge conflict at deploy time. See the "Branches" section of
 [deploy/README.md](../deploy/README.md) for how the release step uses this.
 
+## The web UI is not a client
+
+`src/falconfox/web/static/` is a **dead** browser UI: it was written against
+the old case- and project-centric session model, flattening that model broke
+its navigation, and it has been unmaintained since. It is not a client, it is
+not a second front-end to keep in step, and it is not a description of how the
+system works. Do not read it to learn the shape of anything, do not wire new
+work to it, and do not repair it in passing. Telegram is the only client.
+
+Do not confuse it with `src/falconfox/web/server.py`, which is very much
+alive: that module *is* the daemon's HTTP and websocket API, the thing every
+client and the CLI actually talk to. It only happens to also mount the dead
+static assets.
+
+The assets are slated for deletion soon, with a repair possible after that.
+See the entry in [docs/wishlist.md](../docs/wishlist.md).
+
 ## Checkouts
 
 `~/projects/falconfox` is the development checkout, and it is on `dev`. It is

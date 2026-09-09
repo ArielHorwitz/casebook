@@ -2093,7 +2093,8 @@ class ClientRegistrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Talking through Telegram",
                           mine.joinpath("orientation.md").read_text())
             concierge = mine.joinpath("roles", "concierge.md").read_text()
-            self.assertIn("You are the private chat", concierge)
+            self.assertIn("You are the session behind the bot's **private chat**",
+                          concierge)
             self.assertIn("https://t.me/a_bot?startgroup&admin=manage_topics",
                           concierge)
 

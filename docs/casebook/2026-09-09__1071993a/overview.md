@@ -279,23 +279,40 @@ its text has no client-specific detail in it. **`concierge` is Telegram's**,
 and exists only because Telegram requires a private chat before a forum can be
 reached. A client registers its orientation and its roles in the same file.
 
-### Role names are namespaced by their owner
+### Roles are namespaced, and the namespace comes from the directory
 
 A second client wanting its own "concierge" must not collide with Telegram's.
-Rather than detect that and error, make it impossible: **a client's roles are
-prefixed with the client's name**, so Telegram declares `telegram:concierge`
-and the daemon's own roles are bare (`manager`).
+Rather than detect that and error, the layout makes it impossible.
 
-Collisions then cannot occur, ownership is legible from the name alone, and
-the daemon never has to arbitrate between two clients — which suits a daemon
-whose whole knowledge of a role is "name, text, supplied by whoever registered
-it".
+A client writes a directory named after itself:
 
-The one rule left to enforce is that a client may only declare roles under its
-own prefix. Anything else is **rejected loudly at read time**, naming the
-offending client. That is a complaint about one misbehaving client rather than
-an ambiguous conflict between two, and in particular it stops a client
-shadowing `manager`.
+```
+$XDG_RUNTIME_DIR/falconfox/run-<pid>/clients/
+    telegram/
+        orientation.md
+        roles/
+            concierge.md
+```
+
+The daemon derives the namespace from the path, so Telegram's role is
+`telegram.concierge` and a second client's is `newclient.concierge`. The
+daemon's own roles take the empty namespace and are written `.manager`. Spawn
+accepts them as they read: `--role telegram.concierge`.
+
+Deriving rather than declaring is what makes this structural. There is no
+prefix field a client could get wrong, no arbitration for the daemon to
+perform, and no rule to enforce beyond the layout itself — a client cannot
+shadow `.manager`, because it has nowhere to write it. The only requirement
+left is that client names are unique, which they must be anyway.
+
+It also separates the two kinds of text cleanly, which a single file would
+have had to encode some other way: `orientation.md` is the unconditional
+piece, everything under `roles/` is conditional on a session carrying it.
+
+Two details for the build. Client files should be written to a temporary name
+and renamed into place, since the daemon reads per spawn and could otherwise
+catch a partial write. And client orientations need a deterministic order in
+the composed text — by directory name, for want of any better reason.
 
 ## Implementation plan
 

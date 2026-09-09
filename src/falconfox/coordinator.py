@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Sequence
 
-from . import config, logsetup, state, storage
+from . import config, help as ffhelp, logsetup, state, storage
 from .engine import oneshot
 from .engine.client import resolve_config_value
 from .engine.events import EventBus
@@ -600,7 +600,7 @@ class SessionCoordinator:
         to right now. A role's text is conditional on holding the role.
         """
         clients = self._client_registrations()
-        pieces = [config.SESSION_CONTEXT]
+        pieces = [config.SESSION_CONTEXT + self._help_index()]
         pieces += [entry["orientation"] for _, entry in sorted(clients.items())
                    if entry["orientation"]]
         for role in roles:
@@ -612,6 +612,25 @@ class SessionCoordinator:
                 # it has a job nobody described to it.
                 self.log.warning("no orientation registered for role %r", role)
         return pieces
+
+    def _help_index(self) -> str:
+        """The lookup table, appended to the global piece.
+
+        Generated here rather than written by a client, because it is the one
+        part that spans every namespace: a client knows what it registered and
+        nothing about anyone else, while the daemon sees all of them and its
+        own besides. Generated per spawn, so it describes what is actually
+        registered rather than what was once expected to be.
+        """
+        listing = ffhelp.index(state.clients_dir().parent)
+        if not listing:
+            return ""
+        return ("\n\n## Looking things up\n"
+                "\n"
+                "`falconfox help <topic>` prints more about these, and "
+                "`falconfox help` on its own reprints this list:\n"
+                "\n"
+                f"{listing}")
 
     def _role_orientation(self, role: str, clients: dict) -> Optional[str]:
         """Resolve `telegram.concierge`, or `.manager` for the daemon's own.

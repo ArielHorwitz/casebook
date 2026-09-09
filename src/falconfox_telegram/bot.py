@@ -249,15 +249,75 @@ by tapping over answers they must retype. Assume a message may have been
 transcribed from speech, so a name that is almost right is more likely a
 mis-transcription than a new thing.
 
-**Commands.** `/help` lists them, grouped by what they act on, and is the
-current answer rather than anything repeated here. Worth knowing that `/id`
-gives the user this chat's session id without spending a turn asking you, and
-that `/tags` sets a session's tags from its own topic -- the forum draws the
-first tag it has a symbol for as the topic's icon.
+**Commands.** The user has a set of chat commands the bot handles itself, so
+they never reach you and you cannot run one. `/help` shows them a short list.
+Run `falconfox help telegram.commands` for what each one does, which is what
+you need to answer a question about them or to tell a user which to type.
 
 **A photo may not be the original.** Telegram re-encodes images sent as photos.
 An image you are given may be a degraded copy of something sharper, and asking
 the user to resend it as a *file* rather than a photo gets you the original.
+"""
+
+
+# Looked up rather than told: the commands are the user's to type, so a session
+# needs to recognise them and answer questions about them, but only sometimes.
+# The one-line summaries in /help are written for a user mid-task; this is
+# written for an agent being asked what something does.
+COMMANDS_HELP = """# Telegram commands
+
+Commands the **user** types in the chat. The bot handles them itself and they
+never reach you, so you cannot run one: when a command is the answer, say
+which one to type. `/help` shows the user a short version of this list.
+
+Where a command acts on "this session", it means whichever session speaks in
+the chat it was typed in -- the session that owns that topic, the session
+manager in General, or the private chat's own session.
+
+## Sessions and the daemon
+
+- `/list` lists every session, most recently active first, with each id as
+  tap-to-copy text. Ordering is by activity because the message is capped and
+  the least recently used are the ones dropped.
+- `/new [path] [name]` spawns a session, defaulting to the configured path.
+  `/home [name]` always uses the default path. The new session gets its own
+  topic; nobody creates topics by hand.
+- `/status` reports the daemon, the topics it knows and any turn in flight.
+  It is the first thing to ask for when something looks stuck.
+
+## This session
+
+- `/id` prints this chat's session id, tap-to-copy. Cheaper than asking an
+  agent, which costs a turn.
+- `/tags [tags...]` shows this session's tags, or replaces them; `-` clears.
+  The forum draws the first tag it has a configured icon for as the topic
+  icon. The call replaces the whole list, so tags are carried forward by
+  repeating them.
+- `/name <name>` renames the session whose topic it is typed in, and retitles
+  the topic to match. Only in a topic: General and the private chat have no
+  work session to rename.
+- `/clear` deletes this chat's session and starts a fresh one, losing the
+  conversation. Only for General and the private chat, since a work session's
+  conversation *is* the work. It is also how a session picks up changed
+  orientation, which never reaches sessions that already exist.
+
+## Stopping a turn
+
+A message written while a turn is running is queued rather than refused, and
+goes out when the turn ends.
+
+- `/stop` ends the running turn. Anything queued still goes out afterwards.
+- `/unqueue` drops what is queued and leaves the turn running.
+- `/fullstop` does both. It exists because doing them separately races: after
+  a `/stop` the flush is already coming.
+
+## The host
+
+- `/sh <command>` runs a command on the host, detached in tmux, and reports
+  the output. It does not run inside any session.
+- `/jobs` lists what those commands are doing, `/tail <id>` re-reads a job's
+  output, and `/kill <id>` stops one. Jobs outlive a bot restart; `tmux ls` on
+  the host is the ground truth.
 """
 
 
@@ -868,6 +928,8 @@ class FalconFoxTelegramBot:
             _write_atomic(mine.joinpath("orientation.md"), CLIENT_ORIENTATION)
             _write_atomic(mine.joinpath("roles", "concierge.md"),
                           self._concierge_orientation())
+            mine.joinpath("help").mkdir(exist_ok=True)
+            _write_atomic(mine.joinpath("help", "commands.md"), COMMANDS_HELP)
         except OSError:
             log.warning("could not write orientation to %s -- sessions will "
                         "spawn without it", mine, exc_info=True)

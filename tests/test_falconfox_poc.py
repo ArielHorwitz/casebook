@@ -19,6 +19,7 @@ from unittest.mock import patch
 from falconfox.cli import CliError, _guard_self_target, build_parser, cmd_daemon
 from falconfox import __version__ as falconfox_version
 from falconfox import config, get_version
+from falconfox import help as ffhelp
 from falconfox import state as falconfox_state
 from falconfox.coordinator import SessionCoordinator
 from falconfox.errors import FalconFoxError
@@ -33,6 +34,7 @@ from falconfox_telegram.bot import (QUEUED_FIRST, REACT_QUEUED, REACT_RECEIVED,
 from falconfox_telegram.rendering import TELEGRAM_MESSAGE_LIMIT, render_messages
 from falconfox_telegram.bot import (COMMANDS, PHOTO_LIMIT_BYTES, SECTIONS,
                                     _inline_code, _upload_kind, _write_atomic)
+from falconfox_telegram.bot import COMMANDS_HELP
 from falconfox_telegram.shell import ShellRunner, tail
 
 
@@ -2183,6 +2185,110 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
                               return_value=Path(directory).joinpath("nope")):
                 self.assertEqual(coordinator._orientation([]),
                                  [config.SESSION_CONTEXT])
+
+
+class HelpModuleTests(unittest.TestCase):
+    """The lookup tree behind `falconfox help`."""
+
+    def _run(self, directory, modules):
+        run = Path(directory)
+        for dotted, body in modules.items():
+            namespace, _, rest = dotted.partition(".")
+            root = (run.joinpath("help") if not namespace
+                    else run.joinpath("clients", namespace, "help"))
+            path = root.joinpath(*rest.split(".")).with_suffix(".md")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        return run
+
+    def test_the_directory_decides_the_dotted_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._run(directory, {
+                ".lifecycle": "# Daemon startup, restart, and shutdown\n\nx",
+                "telegram.commands": "# Telegram commands\n\nx",
+                "telegram.commands.new": "# New session command\n\nx",
+            })
+            self.assertEqual(sorted(ffhelp.discover(run)),
+                             [".lifecycle", "telegram.commands",
+                              "telegram.commands.new"])
+
+    def test_the_index_takes_its_titles_from_the_first_heading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._run(directory, {
+                "telegram.commands": "# Telegram commands\n\nbody",
+                ".lifecycle": "no heading, just a line\n\nbody",
+            })
+            listing = ffhelp.index(run)
+            self.assertIn("Telegram commands", listing)
+            # No frontmatter: a document with no heading still gets a title.
+            self.assertIn("no heading, just a line", listing)
+
+    def test_a_module_wins_over_its_own_children(self):
+        # Listing instead would hide a document behind the things below it.
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._run(directory, {
+                "telegram.commands": "# Telegram commands\n\nthe body",
+                "telegram.commands.new": "# New session command\n\nx",
+            })
+            found = ffhelp.lookup(run, "telegram.commands")
+            self.assertIn("the body", found)
+            self.assertIn("More under this topic", found)
+            self.assertIn("telegram.commands.new", found)
+
+    def test_a_branch_lists_what_is_under_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._run(directory, {
+                "telegram.commands": "# Telegram commands\n\nx"})
+            self.assertIn("telegram.commands", ffhelp.lookup(run, "telegram"))
+
+    def test_an_unknown_topic_is_no_answer_rather_than_an_empty_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._run(directory, {"telegram.commands": "# c\n\nx"})
+            self.assertIsNone(ffhelp.lookup(run, "nope"))
+
+    def test_no_registrations_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(ffhelp.index(Path(directory)), "")
+
+
+class HelpInOrientationTests(unittest.IsolatedAsyncioTestCase):
+    """The index the daemon composes into the global piece."""
+
+    def test_the_index_is_generated_daemon_side_from_every_namespace(self):
+        # A client knows only what it registered; the daemon sees all of them
+        # and its own, so the listing cannot be a client's to write.
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory).joinpath("run")
+            for dotted, root in ((".lifecycle", run.joinpath("help")),
+                                 ("telegram.commands",
+                                  run.joinpath("clients", "telegram", "help"))):
+                root.mkdir(parents=True, exist_ok=True)
+                root.joinpath(f"{dotted.split('.')[-1]}.md").write_text(
+                    f"# {dotted} title\n\nbody")
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir",
+                              return_value=run.joinpath("clients")):
+                piece = coordinator._orientation([])[0]
+            self.assertIn("## Looking things up", piece)
+            self.assertIn(".lifecycle", piece)
+            self.assertIn("telegram.commands", piece)
+
+    def test_nothing_registered_means_no_section_at_all(self):
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir",
+                              return_value=Path(directory).joinpath("nope")):
+                piece = coordinator._orientation([])[0]
+            self.assertNotIn("Looking things up", piece)
+
+    def test_every_command_is_documented_somewhere_in_the_help(self):
+        # The one-liners in /help are for a user mid-task; this is what an
+        # agent reads when asked what a command does. A new command that
+        # reaches neither is one nobody can explain.
+        documented = COMMANDS_HELP
+        missing = [usage.split()[0] for usage, _, _ in COMMANDS
+                   if usage.split()[0] not in documented]
+        self.assertEqual(missing, [])
 
 
 class SessionTagTests(unittest.IsolatedAsyncioTestCase):

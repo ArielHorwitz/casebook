@@ -62,7 +62,12 @@ def clients_dir(pid: Optional[int] = None) -> Path:
     find a directory named after a process that did not exist when they were
     written.
     """
-    return runtime_dir().joinpath(f"run-{pid or os.getpid()}", "clients")
+    return run_dir(pid).joinpath("clients")
+
+
+def run_dir(pid: Optional[int] = None) -> Path:
+    """This daemon run's directory: client registrations and help live under it."""
+    return runtime_dir().joinpath(f"run-{pid or os.getpid()}")
 
 
 def prepare_clients_dir() -> Path:

@@ -127,6 +127,13 @@ on every reconnect. The directory name *is* the namespace, so two clients can
 both offer a "concierge" without colliding, and a client that stops running
 stops describing itself to new sessions.
 
+Orientation is what a session cannot work without and is told once, unasked.
+The other half is **help**: `falconfox help <topic>` reads nested markdown that
+clients register in the same directory, so detail can grow without every
+session paying for it. `falconfox help` lists what is registered, namespaced
+the same way roles are, and the daemon composes that listing into the global
+orientation so a session knows what is there to look up.
+
 Orientation is recorded in the session's transcript, marked so clients do not
 display it. Changing it does not reach sessions that already exist, which is
 what `/clear` is for.

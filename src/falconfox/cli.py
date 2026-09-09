@@ -14,7 +14,7 @@ import webbrowser
 from pathlib import Path
 from typing import Optional
 
-from . import state
+from . import help as ffhelp, state
 
 
 class CliError(Exception):
@@ -156,6 +156,36 @@ def cmd_spawn(args) -> None:
     print(session["session_id"])
 
 
+def cmd_help(args) -> None:
+    """Print a help module, or list what is registered.
+
+    Read straight off disk rather than through the daemon: the files are
+    already there and the daemon adds nothing to them. It does have to be
+    running, since it is what publishes the directory they live in, which for
+    an agent inside a session is true by construction.
+    """
+    info = state.read_server_info()
+    if info is None:
+        raise CliError("the daemon is not running, so there is no help to read")
+    directory = getattr(info, "clients_dir", None)
+    if not directory:
+        # Distinguished on purpose: "not running" would be a lie, and the
+        # useful thing to say is which side is out of date.
+        raise CliError("this daemon publishes no help directory; it predates "
+                       "`falconfox help` and needs a restart")
+    run_dir = Path(directory).parent
+    if not args.topic:
+        listing = ffhelp.index(run_dir)
+        print(listing or "No help is registered.")
+        return
+    body = ffhelp.lookup(run_dir, args.topic)
+    if body is None:
+        listing = ffhelp.index(run_dir)
+        raise CliError(f"no help topic {args.topic!r}"
+                       + (f". Registered:\n{listing}" if listing else ""))
+    print(body)
+
+
 def cmd_list(args) -> None:
     suffix = "?include_hidden=true" if args.all else ""
     sessions = _request("GET", f"/api/sessions{suffix}")
@@ -261,6 +291,12 @@ def build_parser() -> argparse.ArgumentParser:
     spawn.add_argument("--path", default=str(Path.home()))
     spawn.add_argument("--name")
     spawn.add_argument("--backend")
+    # Clients register help alongside their orientation, so what is available
+    # depends on what is running rather than on this parser.
+    help_command = sub.add_parser("help", help="read registered help")
+    help_command.add_argument("topic", nargs="?",
+                              help="dotted topic, e.g. telegram.commands")
+    help_command.set_defaults(func=cmd_help)
     spawn.add_argument("--ephemeral", action="store_true")
     # Repeatable, because roles compose: nothing about running the session
     # lifecycle conflicts with a session also being something else. Names are

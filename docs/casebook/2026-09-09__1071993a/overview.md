@@ -345,9 +345,13 @@ nothing about anyone else's, while the daemon sees all of them and its own. It
 is generated per spawn and composed into the global piece, so it describes
 what is actually registered.
 
-**A module wins over its own children.** `telegram.commands` prints the
-document and appends a pointer to `telegram.commands.new`, rather than listing
-children and hiding the document behind them.
+**Listing and lookup answer different questions.** The index walks files, so a
+directory with no `.md` of its own contributes nothing: writing only
+`commands/new.md` lists `telegram.commands.new` and no parent. Lookup is where
+the two can collide, and there a module wins over its own children --
+`falconfox help telegram.commands` prints the document and appends a pointer
+to what is below it, rather than listing children and hiding the document
+behind them. With no document, lookup falls through to that listing.
 
 **Help text is written by hand, not generated from docstrings.** An earlier
 draft would have split the dispatcher into one method per command and lifted
@@ -359,9 +363,11 @@ the help text -- not that each has a file of its own, since one `commands.md`
 covers them all until something earns its own page.
 
 One consequence accepted: `server.json` is removed when the daemon stops, so
-`falconfox help` needs the daemon running. For an agent inside a session that
-is true by construction, and the CLI distinguishes "not running" from "running
-but too old to publish a help directory".
+`falconfox help` needs the daemon running, which for an agent inside a session
+is true by construction. Every other shortfall answers as "no help found" --
+a daemon that publishes no directory is a daemon with no help, and naming a
+narrower reason for it would be a special case that stops being true shortly
+and says less than the general one everywhere else.
 
 ## Implementation plan
 

@@ -167,22 +167,21 @@ def cmd_help(args) -> None:
     info = state.read_server_info()
     if info is None:
         raise CliError("the daemon is not running, so there is no help to read")
+    # A daemon that publishes no directory is just a daemon with no help,
+    # which is the same answer as an empty one. Naming the reason -- an older
+    # daemon, say -- would be a special case that stops being true shortly and
+    # says less than "nothing is registered" in every other case.
     directory = getattr(info, "clients_dir", None)
-    if not directory:
-        # Distinguished on purpose: "not running" would be a lie, and the
-        # useful thing to say is which side is out of date.
-        raise CliError("this daemon publishes no help directory; it predates "
-                       "`falconfox help` and needs a restart")
-    run_dir = Path(directory).parent
+    run_dir = Path(directory).parent if directory else None
+    listing = ffhelp.index(run_dir) if run_dir else ""
     if not args.topic:
-        listing = ffhelp.index(run_dir)
         print(listing or "No help is registered.")
         return
-    body = ffhelp.lookup(run_dir, args.topic)
+    body = ffhelp.lookup(run_dir, args.topic) if run_dir else None
     if body is None:
-        listing = ffhelp.index(run_dir)
-        raise CliError(f"no help topic {args.topic!r}"
-                       + (f". Registered:\n{listing}" if listing else ""))
+        raise CliError(f"no help found for {args.topic!r}"
+                       + (f". Registered:\n{listing}" if listing
+                          else ". Nothing is registered."))
     print(body)
 
 

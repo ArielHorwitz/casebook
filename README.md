@@ -144,12 +144,24 @@ A session can carry **tags** - `/tags urgent` in its topic, or `falconfox tag`
 - which are opaque labels that the forum draws as the topic's icon, one per
 tag, mapped in `config.toml`.
 
+A file sent to a chat lands in that session's **tray** and waits, because a
+chat has no compose step: a photo is its own message, and an album arrives as
+several with nothing marking the last. The next real message sweeps the tray
+and carries one `attached: <path>` line per file, in arrival order, with each
+file's caption on its own line. A caption is not that message, which is the one
+surprise here and is why every file gets a receipt saying so. `/tray` shows
+what is waiting and removes from it, the opposite sense to `/tags`. The bytes
+live under the session's own state directory and go when it does. Telegram
+will not let a bot download more than 20MB, against 50MB for upload, and a
+larger file is refused with that reason.
+
 A message written while a turn is running is **queued**, not refused: it goes
 out when the turn ends, and several of them are joined into one prompt. `/stop`
 ends the running turn, which is what makes the queue drain; `/unqueue` drops
 what is queued and leaves the turn alone; `/fullstop` does both, since doing
 them separately in that order races the flush.
 
-Voice messages and interactive permissions are intentionally deferred. The PoC
+Voice *input* and interactive permissions are intentionally deferred: nothing
+is transcribed, so a voice message is stored as the audio file it is. The PoC
 uses always-allow sessions; a permission request with no choices is denied
 immediately instead of hanging.

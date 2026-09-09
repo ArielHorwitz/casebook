@@ -568,6 +568,19 @@ class FakeTelegram:
         self.deleted = getattr(self, "deleted", [])
         self.deleted.append(thread)
 
+    DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
+
+    async def file_path(self, file_id):
+        self.described = getattr(self, "described", [])
+        self.described.append(file_id)
+        return self.remote_paths.get(file_id, "photos/file_12.jpg")
+
+    async def download(self, remote_path, into):
+        into.write_bytes(b"bytes of " + remote_path.encode())
+        return into
+
+    remote_paths: dict = {}
+
     async def chat_action(self, chat_id, action, thread=None):
         if self.action_error is not None:
             raise self.action_error
@@ -2996,6 +3009,235 @@ class TagsCommandTests(unittest.IsolatedAsyncioTestCase):
             bot.daemon.tag = _refuse
             await bot._handle_update(self._update("/tags 'needs review'"))
             self.assertIn("Could not set tags", bot.telegram.messages[0][1])
+
+
+class TrayTests(unittest.IsolatedAsyncioTestCase):
+    """Inbound files: a chat has no compose step, so they wait in a tray.
+
+    The tray is this client's own state, and the daemon holds the bytes.
+    """
+
+    def _bot(self, directory):
+        bot = FalconFoxTelegramBot(BotConfig(
+            "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+            state_dir=Path(directory),
+        ))
+        bot.telegram = FakeTelegram()
+        bot._bind("session", 20)
+        self.store = {}
+        self.removed = []
+        outer = self
+
+        class FakeDaemon:
+            async def add_file(inner, session_id, path, name=None):
+                file_id = f"f{len(outer.store)}"
+                outer.store[file_id] = {"session": session_id, "name": name,
+                                        "body": Path(path).read_bytes()}
+                return {"file_id": file_id, "name": name,
+                        "path": f"/state/{session_id}/inbox/{file_id}/{name}"}
+
+            async def remove_file(inner, session_id, file_id):
+                outer.removed.append(file_id)
+                outer.store.pop(file_id, None)
+                return {"removed": 1}
+
+        bot.daemon = FakeDaemon()
+        self.sent = []
+
+        class FakeWebSocket:
+            async def send(inner, payload):
+                action = json.loads(payload)
+                if action.get("action") == "send":
+                    outer.sent.append((action["session_id"], action["text"]))
+
+        bot._ws = FakeWebSocket()
+        return bot
+
+    @staticmethod
+    def _photo(message_id=1, caption=None, size=1000):
+        message = {"chat": {"id": -1001}, "message_thread_id": 20,
+                   "message_id": message_id, "from": {"id": 7},
+                   "photo": [{"file_id": "small", "file_size": 10},
+                             {"file_id": "big", "file_size": size}]}
+        if caption is not None:
+            message["caption"] = caption
+        return {"message": message}
+
+    @staticmethod
+    def _text(body, message_id=9):
+        return {"message": {"chat": {"id": -1001}, "message_thread_id": 20,
+                            "message_id": message_id, "from": {"id": 7},
+                            "text": body}}
+
+    async def test_a_photo_waits_instead_of_prompting(self):
+        # The decision the rest follows from: one message can be about five
+        # photos, and an album has nothing marking its last part.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo())
+            self.assertEqual(self.sent, [], "a file must not start a turn")
+            self.assertEqual(len(bot._trays["session"]), 1)
+            self.assertIn((1, REACT_QUEUED), bot.telegram.reactions)
+
+    async def test_the_receipt_carries_a_tappable_id_and_says_when(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo())
+            rich = bot.telegram.html_messages[0][1]
+            self.assertIn("<code>f0</code>", rich, "the id has to be tappable")
+            self.assertIn("next message", rich,
+                          "a file that waits silently reads as one ignored")
+
+    async def test_a_photo_is_stored_under_a_name_nothing_invented(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            bot.telegram.remote_paths = {"big": "photos/file_12.jpg"}
+            await bot._handle_update(self._photo())
+            self.assertEqual(self.store["f0"]["name"], "photo.jpg")
+
+    async def test_a_document_keeps_the_name_it_arrived_with(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_thread_id": 20, "message_id": 2,
+                "from": {"id": 7},
+                "document": {"file_id": "d1", "file_name": "prod-error.log",
+                             "file_size": 40}}})
+            self.assertEqual(self.store["f0"]["name"], "prod-error.log")
+
+    async def test_the_largest_rendition_of_a_photo_is_the_one_taken(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo())
+            self.assertEqual(bot.telegram.described, ["big"])
+
+    async def test_the_next_message_carries_the_tray_and_empties_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_update(self._photo(2, caption="the error"))
+            await bot._handle_update(self._text("what do you make of these?"))
+            (_session, prompt), = self.sent
+            self.assertIn("attached: /state/session/inbox/f0/photo.jpg", prompt)
+            self.assertIn("attached: /state/session/inbox/f1/photo.jpg (the error)",
+                          prompt)
+            self.assertTrue(prompt.endswith("what do you make of these?"),
+                            "the files lead, as context for the message")
+            self.assertNotIn("session", bot._trays)
+
+    async def test_a_carried_file_loses_the_marker_it_waited_under(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_update(self._text("go"))
+            self.assertIn((1, None), bot.telegram.reactions)
+
+    async def test_a_caption_alone_never_prompts(self):
+        # The design's one surprise, and it is deliberate: an album's caption
+        # rides one of its parts, so this would fire mid-album.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(caption="what is this?"))
+            self.assertEqual(self.sent, [])
+
+    async def test_a_command_leaves_the_tray_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo())
+            await bot._handle_update(self._text("/id"))
+            self.assertEqual(len(bot._trays["session"]), 1)
+
+    async def test_a_file_over_the_download_limit_is_refused_with_the_reason(self):
+        # Checked from the message: attempting it would fail slower and say
+        # less, and the limit is Telegram's rather than ours.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(size=30 * 1024 * 1024))
+            self.assertEqual(self.store, {})
+            self.assertIn("20MB", bot.telegram.messages[0][1])
+            self.assertIn((1, REACT_FAILED), bot.telegram.reactions)
+
+    async def test_a_message_carrying_nothing_we_take_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_thread_id": 20, "message_id": 3,
+                "from": {"id": 7}, "sticker": {"file_id": "s1"}}})
+            self.assertIn("not that", bot.telegram.messages[0][1])
+            self.assertEqual(self.store, {})
+
+    async def test_a_topic_service_message_is_still_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update({"message": {
+                "chat": {"id": -1001}, "message_thread_id": 20, "message_id": 4,
+                "from": {"id": 7}, "forum_topic_created": {"name": "x"}}})
+            self.assertEqual(bot.telegram.messages, [])
+
+    async def test_bare_tray_lists_what_is_waiting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1, caption="left knee"))
+            await bot._handle_update(self._text("/tray"))
+            rich = bot.telegram.html_messages[-1][1]
+            self.assertIn("<code>f0</code>", rich)
+            self.assertIn("left knee", rich)
+
+    async def test_tray_arguments_remove_rather_than_replace(self):
+        # The inversion against /tags, which is why the help line says
+        # "remove" plainly.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_update(self._photo(2))
+            await bot._handle_update(self._text("/tray f0"))
+            self.assertEqual(self.removed, ["f0"])
+            self.assertEqual([item["file_id"] for item in bot._trays["session"]],
+                             ["f1"])
+            self.assertIn((1, REACT_DISCARDED), bot.telegram.reactions)
+
+    async def test_removing_deletes_rather_than_unlists(self):
+        # It was never going to reach the agent, so nothing is left to keep.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_update(self._text("/tray -"))
+            self.assertEqual(self.store, {})
+            self.assertNotIn("session", bot._trays)
+
+    async def test_an_unknown_id_removes_nothing_and_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_update(self._text("/tray nope"))
+            self.assertEqual(self.removed, [])
+            self.assertEqual(len(bot._trays["session"]), 1)
+            self.assertIn("Nothing in the tray", bot.telegram.messages[-1][1])
+
+    async def test_an_empty_tray_says_it_is_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._text("/tray"))
+            self.assertIn("empty", bot.telegram.messages[-1][1])
+
+    async def test_the_tray_survives_a_restart(self):
+        # It has to: the files are already in the daemon's store, and a tray
+        # that forgot them would leave them waiting for nothing.
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            revived = self._bot(directory)
+            revived._load_tray()
+            self.assertEqual([item["file_id"] for item in revived._trays["session"]],
+                             ["f0"])
+
+    async def test_a_deleted_session_takes_its_tray(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bot = self._bot(directory)
+            await bot._handle_update(self._photo(1))
+            await bot._handle_event({"type": "session_removed",
+                                     "session_id": "session"})
+            self.assertNotIn("session", bot._trays)
 
 
 class SessionListingTests(unittest.IsolatedAsyncioTestCase):

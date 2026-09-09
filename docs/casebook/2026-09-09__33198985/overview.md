@@ -300,8 +300,11 @@ photos and that resending as a file gets the original.
 
 What is owed is the tray itself, in the Telegram client orientation: that
 files land in a tray and wait, that a message sweeps it, and that the paths
-arrive in the prompt. The global piece owes a line on the store, since a
-session that has one should know where its files live. `/tray` also joins
+arrive in the prompt. **Not the global piece**, which was the plan and is
+wrong: the store is reachable only through a client, so a session with no
+client would be told about files it can never be given. What an agent actually
+needs to know about the store is that a path it was handed stays valid, and
+that belongs beside the tray text. `/tray` also joins
 `COMMANDS`, `COMMANDS_HELP` and the `/help` Session section, and the test that
 every command in `COMMANDS` appears in the help text is what guards it.
 

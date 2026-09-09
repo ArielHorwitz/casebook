@@ -177,9 +177,28 @@ milder one — a spawn in the gap between daemon start and client start, which
 self-corrects on the next spawn and is close to unreachable for a
 Telegram-originated spawn, since that requires the bot to be up already.
 
-Note a subdirectory *per daemon run* cannot work: clients would have to know
-the run id before the daemon creates it. Tmpfs already gives per-boot
-granularity, which is the same intent.
+**The directory is per daemon run**, and that is what removes staleness
+entirely rather than managing it.
+
+This was first dismissed as circular — clients would have to know the run id
+before the daemon creates it — which is wrong: the daemon *publishes* the
+path. `server.json` already exists for exactly this kind of discovery, written
+at daemon startup with pid, port and start time, with read helpers in
+`state.py`. So the daemon creates
+`$XDG_RUNTIME_DIR/falconfox/run-<pid>/clients/`, names it in `server.json`,
+and clients write there.
+
+A new run is a new directory, so a client that has been removed or disabled
+leaves its file behind in a directory nothing reads again. No periodic
+cleanup, no clients rewriting on a timer, no question of whether a file is
+current. Old run directories are a few kilobytes of text on tmpfs and go on
+reboot; the daemon may also remove sibling run directories at startup, which
+is safe because those runs are over.
+
+**This requires clients to write on every connect**, not only at their own
+startup. Otherwise a daemon restart strands a still-running client's
+orientation in the previous run's directory. The Telegram bot already
+reconnects, so it is a write on a path that exists.
 
 The case for this over hardcoding daemon-side is not mainly decoupling. It is
 that the manager and concierge texts **already** live in `bot.py`, next to the

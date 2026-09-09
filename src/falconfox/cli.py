@@ -175,13 +175,18 @@ def cmd_help(args) -> None:
     run_dir = Path(directory).parent if directory else None
     listing = ffhelp.index(run_dir) if run_dir else ""
     if not args.topic:
-        print(listing or "No help is registered.")
+        print(f"Help modules ({ffhelp.READ_ONE}):\n\n{listing}" if listing
+              else "No help is registered.")
         return
     body = ffhelp.lookup(run_dir, args.topic) if run_dir else None
     if body is None:
         raise CliError(f"no help found for {args.topic!r}"
-                       + (f". Registered:\n{listing}" if listing
-                          else ". Nothing is registered."))
+                       + (f". Help modules ({ffhelp.READ_ONE}):\n{listing}"
+                          if listing else ". Nothing is registered."))
+    # A branch has no text of its own, so what comes back is a listing and
+    # needs the same invitation a bare call gets.
+    if body == ffhelp.index(run_dir, args.topic):
+        body = f"Help modules under {args.topic} ({ffhelp.READ_ONE}):\n\n{body}"
     print(body)
 
 
@@ -293,8 +298,8 @@ def build_parser() -> argparse.ArgumentParser:
     # Clients register help alongside their orientation, so what is available
     # depends on what is running rather than on this parser.
     help_command = sub.add_parser("help", help="read registered help")
-    help_command.add_argument("topic", nargs="?",
-                              help="dotted topic, e.g. telegram.commands")
+    help_command.add_argument("topic", nargs="?", metavar="module",
+                              help="dotted module path, e.g. telegram.commands")
     help_command.set_defaults(func=cmd_help)
     spawn.add_argument("--ephemeral", action="store_true")
     # Repeatable, because roles compose: nothing about running the session

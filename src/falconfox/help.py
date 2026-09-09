@@ -24,6 +24,11 @@ from typing import Optional
 
 HELP_DIRNAME = "help"
 
+# A bare listing reads as output, not as an invitation. Every place one is
+# printed says how to open an entry, because the reader is often an agent
+# deciding whether a second turn is worth spending.
+READ_ONE = "read one with `falconfox help <module>`"
+
 
 def _title(body: str) -> str:
     """The first heading, or failing that the first line with anything on it.
@@ -99,6 +104,8 @@ def lookup(run_dir: Path, name: str) -> Optional[str]:
         deeper = "\n".join(line for line in below.splitlines()
                            if not line.startswith(name + " ")
                            and not line.startswith(name + "  "))
-        return f"{body}\n\nMore under this topic:\n{deeper}" if deeper else body
+        if not deeper:
+            return body
+        return f"{body}\n\nMore under this topic ({READ_ONE}):\n{deeper}"
     listing = index(run_dir, name)
     return listing or None

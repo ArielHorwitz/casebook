@@ -633,8 +633,8 @@ class SessionCoordinator:
             return ""
         return ("\n\n## Looking things up\n"
                 "\n"
-                "`falconfox help <topic>` prints more about these, and "
-                "`falconfox help` on its own reprints this list:\n"
+                "`falconfox help <module>` prints one of these, and "
+                "`falconfox help` on its own reprints the list:\n"
                 "\n"
                 f"{listing}")
 

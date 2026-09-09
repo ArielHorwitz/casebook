@@ -26,7 +26,7 @@ from falconfox.errors import FalconFoxError
 from falconfox.engine.session import AgentSession, PromptPart
 from falconfox.storage import SessionStore
 from falconfox.watchdog import StallWatchdog
-from falconfox_telegram.api import ApiError, _json_request
+from falconfox_telegram.api import ApiError, DaemonApi, _json_request
 from falconfox_telegram.bot import (QUEUED_FIRST, REACT_QUEUED, REACT_RECEIVED,
                                     REACT_RUNNING, REACT_DONE, REACT_DISCARDED,
                                     REACT_FAILED, Dest, DAEMON_DOWN, QUIET_TURN_SECONDS,
@@ -1144,7 +1144,7 @@ class TurnRecoveryTests(unittest.IsolatedAsyncioTestCase):
             return [{"session_id": "session", "name": "work thing",
                      "state": self._state, "path": "/tmp"}]
 
-        async def session(self, session_id):
+        async def session(self, session_id, include_transcript=False):
             return {"session_id": session_id, "transcript": self._transcript}
 
     @staticmethod
@@ -1344,7 +1344,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             bot.manager_session_id = "manager"
 
             class _Mgr:
-                async def session(self, session_id):
+                async def session(self, session_id, include_transcript=False):
                     return {"session_id": session_id}
             bot.daemon = _Mgr()
             forwarded = []
@@ -1563,7 +1563,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             spawns = []
 
             class _Daemon:
-                async def session(self, session_id):
+                async def session(self, session_id, include_transcript=False):
                     raise ApiError("no such session")
 
                 async def spawn(self, path, name=None, backend=None,
@@ -1582,7 +1582,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             kwargs = {}
 
             class _Daemon:
-                async def session(self, session_id):
+                async def session(self, session_id, include_transcript=False):
                     raise ApiError("none")
 
                 async def spawn(self, path, name=None, backend=None,
@@ -1599,7 +1599,7 @@ class ForumTopicTests(unittest.IsolatedAsyncioTestCase):
             spawns = []
 
             class _Daemon:
-                async def session(self, session_id):
+                async def session(self, session_id, include_transcript=False):
                     return {"session_id": session_id}
 
                 async def spawn(self, path, name=None, backend=None, ephemeral=False,
@@ -2200,6 +2200,49 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
                               return_value=Path(directory).joinpath("nope")):
                 self.assertEqual(coordinator._orientation([]),
                                  [config.SESSION_CONTEXT.rstrip() + "\n"])
+
+
+class SessionReadTests(unittest.IsolatedAsyncioTestCase):
+    """Reading a session should not cost its whole history."""
+
+    async def test_the_client_asks_for_a_transcript_only_when_it_wants_one(self):
+        asked = []
+
+        async def fake_request(url, *_args, **_kwargs):
+            asked.append(url)
+            return {}
+
+        api = DaemonApi("http://daemon")
+        with patch("falconfox_telegram.api._json_request", fake_request):
+            await api.session("abcd1234")
+            await api.session("abcd1234", include_transcript=True)
+        self.assertTrue(asked[0].endswith("/api/sessions/abcd1234"))
+        self.assertTrue(asked[1].endswith("?include_transcript=true"))
+
+    async def test_the_bot_asks_only_where_it_needs_one(self):
+        # The two hot callers want a field -- does this exist, where does it
+        # run -- and a transcript grows without bound between clears, so
+        # sending one by default made an existence check cost megabytes.
+        asked = []
+
+        class Daemon:
+            async def session(self, session_id, include_transcript=False):
+                asked.append(include_transcript)
+                return {"session_id": session_id, "path": "/srv/work",
+                        "transcript": []}
+
+        with tempfile.TemporaryDirectory() as directory:
+            bot = FalconFoxTelegramBot(BotConfig(
+                "token", 7, daemon_url=UNREACHABLE_DAEMON, forum_chat_id=-1001,
+                state_dir=Path(directory), default_path=Path("/tmp")))
+            bot.telegram = FakeTelegram()
+            bot.daemon = Daemon()
+            bot._bind("abcd1234", 42)
+            await bot._still_exists("abcd1234")
+            await bot._shell_cwd(Dest(-1001, 42))
+            self.assertEqual(asked, [False, False])
+            await bot._turn_text_from_transcript("abcd1234")
+            self.assertEqual(asked[-1], True)
 
 
 class HelpModuleTests(unittest.TestCase):
@@ -3085,7 +3128,7 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             bot._bind("abcd1234", 42)
 
             class Daemon:
-                async def session(self, session_id):
+                async def session(self, session_id, include_transcript=False):
                     return {"session_id": session_id, "path": "/srv/work"}
 
             bot.daemon = Daemon()
@@ -3115,7 +3158,7 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             self.spawned.append(kwargs)
             return {"session_id": f"new{len(self.spawned)}"}
 
-        async def session(self, session_id):
+        async def session(self, session_id, include_transcript=False):
             raise ApiError("no such session")
 
     async def test_a_hidden_session_never_gets_a_topic(self):

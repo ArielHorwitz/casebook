@@ -891,7 +891,7 @@ class FalconFoxTelegramBot:
         byte-for-byte the text a connected client would have accumulated.
         """
         try:
-            detail = await self.daemon.session(session_id)
+            detail = await self.daemon.session(session_id, include_transcript=True)
         except ApiError:
             log.warning("could not fetch transcript for %s", session_id, exc_info=True)
             return None

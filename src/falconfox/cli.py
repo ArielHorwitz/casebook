@@ -228,14 +228,16 @@ def _agent_reply(transcript: list[dict]) -> str:
 
 def cmd_send(args) -> None:
     _request("POST", f"/api/sessions/{args.session_id}/send", {"text": args.message})
-    detail = _request("GET", f"/api/sessions/{args.session_id}")
+    detail = _request(
+        "GET", f"/api/sessions/{args.session_id}?include_transcript=true")
     reply = _agent_reply(detail["transcript"])
     if reply:
         print(reply)
 
 
 def cmd_read(args) -> None:
-    detail = _request("GET", f"/api/sessions/{args.session_id}")
+    detail = _request(
+        "GET", f"/api/sessions/{args.session_id}?include_transcript=true")
     if args.json:
         print(json.dumps(detail["transcript"], indent=2))
         return

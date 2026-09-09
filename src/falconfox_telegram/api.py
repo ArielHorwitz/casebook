@@ -101,9 +101,17 @@ class DaemonApi:
         suffix = "?include_hidden=true" if include_hidden else ""
         return await _json_request(f"{self.base_url}/api/sessions{suffix}")
 
-    async def session(self, session_id: str) -> dict:
-        """Session metadata plus its full transcript."""
-        return await _json_request(f"{self.base_url}/api/sessions/{session_id}")
+    async def session(self, session_id: str,
+                      include_transcript: bool = False) -> dict:
+        """Session metadata, and the transcript only when it is wanted.
+
+        Off by default because most callers want a field: whether the session
+        exists at all, or the directory it runs in. A transcript is megabytes
+        on a session that has been useful for a while.
+        """
+        suffix = "?include_transcript=true" if include_transcript else ""
+        return await _json_request(
+            f"{self.base_url}/api/sessions/{session_id}{suffix}")
 
     async def spawn(self, *, path: str, name: str | None = None,
                     backend: str | None = None, ephemeral: bool = False,

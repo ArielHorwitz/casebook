@@ -92,10 +92,14 @@ def create_app(
                 coordinator.log.info("action=delete via=http session=%s", session_id)
                 await coordinator.delete_session(session_id)
                 return JSONResponse({"deleted": session_id})
-            return JSONResponse({
-                **coordinator.get_session(session_id),
-                "transcript": coordinator.transcript(session_id),
-            })
+            # The transcript is asked for, not assumed. Most reads of a
+            # session want a field or two -- does it exist, where does it run
+            # -- and a transcript grows without bound between clears, so
+            # sending one by default made an existence check cost megabytes.
+            detail = coordinator.get_session(session_id)
+            if request.query_params.get("include_transcript") in ("1", "true"):
+                detail["transcript"] = coordinator.transcript(session_id)
+            return JSONResponse(detail)
         except FalconFoxError as error:
             return JSONResponse({"error": str(error)}, status_code=404)
 

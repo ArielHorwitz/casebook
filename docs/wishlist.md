@@ -203,72 +203,11 @@ backend that says no. The motivating case is an attached image arriving as an
 
 **The producers still gluing text together.** Orientation was moved
 deliberately; these were not, and each is a string where structure would do:
-the interrupted-turn notice, the `attached: <path>` lines the tray will add,
-and the re-sent transcript, which is a whole prior conversation flattened into
-one block.
-
-## Inbound attachments: a per-session tray
-
-*From the inbound attachments discussion, 2026-09-08/09. Design settled, not
-built. Paused behind the orientation case
-([2026-09-09__1071993a](casebook/2026-09-09__1071993a/overview.md)), because a
-session only learns any of this through orientation.*
-
-The bot can send files (`falconfox attach`) and cannot receive them: a photo
-or document sent to a topic is answered with "Text messages only in this PoC."
-
-**A file does not prompt the agent by itself.** It lands in a per-session
-**tray** and waits. The next real message sweeps whatever is in the tray and
-carries it. This is the decision the rest follows from, and it was reached by
-rejecting the alternative: if each file were its own prompt, then sending
-three photos and asking one question about all of them is impossible, and a
-Telegram album — which arrives as *n* separate messages with no
-album-complete signal — would need a debounce timer to guess when the set had
-finished. The tray deletes that problem rather than solving it.
-
-**Storage.** `<state>/sessions/<session_id>/inbox/<uuid>/<original-name>`. A
-directory per attachment, rather than a uuid filename, so collisions are
-impossible while the real name survives intact — a name carries information
-(`prod-error.log` says something), and renaming would have to guess at
-extensions like `.tar.gz`.
-
-**The prompt** gets an `attached: <path>` line per file, in arrival order,
-with each file's own caption travelling on its line rather than being merged
-into the message.
-
-**`/tray`**, shaped after `/tags` and living in the **Session** section of
-`/help`:
-
-- no arguments shows the tray, with a short id per item
-- `-` clears it, deleting the files
-- one or more ids removes those
-
-Note the shape is borrowed from `/tags` but the meaning is inverted: `/tags`
-arguments *replace* the set, `/tray` arguments *remove* from it. Removal is
-the right fit for the common case of dropping one bad photo out of five, so
-the help line has to say "remove" plainly.
-
-Ids are 8 characters, matching session ids, and the receipt the bot sends for
-each file carries one in a `<code>` span so it can be tapped and copied.
-
-`-` deletes the bytes with no grace period. Recovering a mistaken clear was
-considered and rejected as complexity that a deliberate `-` does not warrant.
-
-**Reactions were considered and dropped.** An earlier shape had the user react
-to a file to unattach it. `/tray` covers it without needing
-`message_reaction` in `allowed_updates`, and without the private chat gap:
-reaction updates require the bot to be an administrator, which holds in the
-forum (verified) but has no meaning in a private chat.
-
-**Smaller decisions.** A file arriving mid-turn queues like text does and gets
-the same 👀 reaction. A command such as `/list` leaves the tray alone; only a
-real prompt sweeps it. Downloads are capped at 20MB by `getFile` — against
-50MB for upload, an asymmetry of the Bot API, not a policy — and anything
-larger is refused with the reason.
-
-**Orientation owes two things** once that case lands: how the tray works at
-all, and that Telegram re-encodes photos, so an image an agent receives may
-be a degraded copy and the user can resend as a file to get the original.
+the interrupted-turn notice, the `attached: <path>` lines the tray adds, and
+the re-sent transcript, which is a whole prior conversation flattened into one
+block. The tray composes its lines in the client rather than the daemon
+([2026-09-09__33198985](casebook/2026-09-09__33198985/overview.md)), so its
+half of this lands when the `send` action grows an array a client can fill.
 
 ## Deliberately not planned
 

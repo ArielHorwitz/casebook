@@ -1,0 +1,7 @@
+title = "Inbound attachments: the daemon gives every session a file store, and Telegram builds a tray on it because a chat has no compose step"
+status = "open"
+created = "2026-09-09T00:00:00.000000"
+keywords = ["attachments", "inbound", "tray", "inbox", "file-store", "telegram",
+            "photo", "document", "voice", "getFile", "album", "caption",
+            "receipt", "reaction", "compose", "session-state", "prune",
+            "content-blocks", "falconfox"]

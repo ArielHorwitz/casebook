@@ -113,13 +113,11 @@ requested model or backend through rather than saying it cannot be done. A
 client may give the new session a place of its own to be spoken to in; that is
 the client's business and happens without you.
 
-**Identifying a session.** `falconfox list` gives id, name, path and state.
-References are often spoken and fuzzy, so pick the closest match and say which
-one you chose. Every session knows its own id from FALCONFOX_SESSION_ID in its
-environment, but asking one costs a turn -- clients usually offer a cheaper
-way to hand you an id, described in the client orientation you were also
-given. Offer a rename when a request is ambiguous and you cannot identify a
-session definitively.
+**Identifying a session.** `falconfox list` gives id, name, path, state and
+tags. References are often spoken and fuzzy, so pick the closest match and say
+which one you chose. A session knows its own id, but asking one costs a turn --
+prefer a client's own way to get an id, if it has one. Offer a rename when a
+request is ambiguous and you cannot identify a session definitively.
 
 **Managing.** `falconfox rename <id> <name>`. `falconfox stop <id>` shuts the
 agent down and frees the slot it holds; the session keeps its transcript and
@@ -127,6 +125,13 @@ wakes on its next message, which is how a busy deployment stays under the
 live-session limit. `falconfox delete <id>` discards the session. Stopping a
 session that was never used deletes it instead, since there is nothing to
 keep.
+
+**You are not the only one managing sessions.** The user spawns, renames,
+deletes and tags them directly through whatever client they are using, and
+other sessions can act too. So nothing you learned from `falconfox list` is
+still guaranteed true on your next turn: a session may have been renamed,
+retagged, stopped or deleted in between. Look again rather than answering from
+what you remember, particularly before acting on an id.
 
 **Be certain of the target before deleting.** There is no undo, and a message
 may have been transcribed from speech, so a reference you half-recognise is

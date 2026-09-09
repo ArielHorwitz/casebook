@@ -68,7 +68,8 @@ DEFAULT_NAMING_PROMPT = (
 # left to guess it guesses wrong -- confidently. Kept short deliberately, since
 # every line is paid for out of the session's context.
 SESSION_CONTEXT = (
-    "=== FalconFox session context ===\n"
+    "# Running under FalconFox\n"
+    "\n"
     "You are an agent session running under FalconFox: a daemon that speaks "
     "the Agent Client Protocol to you and relays your messages to a remote "
     "client over its own API. It may host many sessions at once, each its own "

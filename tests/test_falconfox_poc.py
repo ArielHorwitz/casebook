@@ -1803,7 +1803,7 @@ class SessionContextTests(unittest.IsolatedAsyncioTestCase):
 
             first, second = session.sent
             # Its own block, not glued to the front of what the user typed.
-            self.assertIn("FalconFox session context", first[0].text)
+            self.assertIn("Running under FalconFox", first[0].text)
             self.assertTrue(first[0].system)
             self.assertEqual(first[-1].text, "hello")
             self.assertFalse(first[-1].system)

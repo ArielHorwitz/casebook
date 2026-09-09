@@ -153,18 +153,33 @@ instead of managing it.
 Secondary virtues: it survives a client restart, it survives transient
 connection trouble, and it can be read with `cat` when something looks wrong.
 
-Two details to settle when building:
+**The daemon reads at spawn, from `XDG_RUNTIME_DIR`.** Both halves were argued
+the other way first and both were changed by the same fact.
 
-- **Read at spawn, not at daemon startup.** Reading once at startup means a
-  client that comes up later needs a daemon restart before its orientation
-  reaches anything. Reading per spawn costs a directory listing.
-- **Where the directory lives.** `XDG_RUNTIME_DIR` is tmpfs, so it self-cleans
-  on reboot and only lists clients that have started since — good for
-  liveness, bad if the daemon spawns something before a client has written.
-  The state directory is durable and has the opposite pair of properties: a
-  removed client leaves its file behind until someone deletes it. Leaning
-  durable, on the grounds that a stale orientation is inspectable and fixable
-  while a missing one is invisible.
+Reading once at daemon startup is simpler and has the appealing property that
+the files cannot shift under a long-running process. It does not work here:
+`falconfox-telegram` is `After=falconfox-daemon`, correctly, since the bot is
+a client that connects *to* the daemon. So the daemon always starts first, and
+on a tmpfs that is empty every boot it would read nothing and describe no
+client at all until someone restarted it by hand. Pairing startup reads with a
+durable directory fixes that but leaves the daemon permanently one restart
+behind whatever the client last wrote.
+
+Reading per spawn costs a directory listing and removes both problems.
+
+With per-spawn reads, tmpfs beats a durable directory on **accuracy**: the
+orientation then describes the clients that are actually running, so a session
+spawned while the bot is down is not told it has a `/tray` and topics. A
+durable directory would keep describing a stopped client indefinitely, and
+wrong information is worse than missing information here, because an agent
+acts on an affordance it is told it has. The tmpfs failure mode is also the
+milder one — a spawn in the gap between daemon start and client start, which
+self-corrects on the next spawn and is close to unreachable for a
+Telegram-originated spawn, since that requires the bot to be up already.
+
+Note a subdirectory *per daemon run* cannot work: clients would have to know
+the run id before the daemon creates it. Tmpfs already gives per-boot
+granularity, which is the same intent.
 
 The case for this over hardcoding daemon-side is not mainly decoupling. It is
 that the manager and concierge texts **already** live in `bot.py`, next to the

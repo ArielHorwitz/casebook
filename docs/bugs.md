@@ -49,6 +49,24 @@ eve of a stability soak, since it adds a code path to the hot send path.
 Workaround until then: do not delete a session's topic by hand. Delete the
 *session* (`falconfox delete`), which removes its topic as a consequence.
 
+## A lost topic icon cannot be repaired by setting the same tag again
+
+`_apply_icon` skips the API call when the icon it remembers for a session
+already matches the one the tags ask for. That is deliberate -- every edit
+posts a service message into the topic, so acting on non-changes would be
+chat noise -- but it means the bot's memory, not the topic, decides whether
+the call happens.
+
+So if an icon change is ever genuinely lost on the way to a client, re-setting
+the same tag does nothing: the bot believes the topic already wears it. The
+workaround is to tag through a different value and back, which forces two real
+edits.
+
+Seen once, 2026-09-09, as an icon that did not appear to change on setting a
+tag. That instance turned out to be a client-side render lag rather than a
+lost update -- the call went out and Telegram accepted it -- so this is the
+fragility the incident exposed rather than the incident itself.
+
 ## Known-broken by design
 
 **The web UI does not work against the flat session model.** Flattening removed

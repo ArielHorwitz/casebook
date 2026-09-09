@@ -160,33 +160,34 @@ done now because it is a question about what tags *mean* on a session with no
 topic, and answering it in passing while splitting `/help` would have been
 guessing.
 
-## Take advantage of multiple prompt content blocks
+## Typed prompt content blocks, and the producers still concatenating
 
-*From the inbound attachments case, 2026-09-08.*
+*From the inbound attachments case, 2026-09-08. The array half was built by the
+orientation case ([2026-09-09__1071993a](casebook/2026-09-09__1071993a/overview.md)),
+2026-09-09.*
 
-An ACP prompt is an **array** of content blocks. FalconFox sends exactly one:
-`prompt=[text_block(text)]`. So everything that is not the user's own words is
-concatenated into the same string they typed — the session context, the
-interruption notice, and now `attached: <path>`. All of it reads to the agent
-as though the user said it, and an agent has no way to tell the difference.
+An ACP prompt is an **array** of content blocks and FalconFox sent exactly one,
+so everything that was not the user's own words got concatenated into the same
+string they typed, and read to the agent as though the user had said it.
 
-The schema already has the parts. `acp.schema` carries `TextContentBlock`,
-`ImageContentBlock`, `ResourceLink`, `EmbeddedResourceContentBlock` and
-`AudioContentBlock`, and the initialize response carries `promptCapabilities`
-saying which of them a backend will accept. Today `_spawn` reads only
-`load_session` off that object and drops the rest.
+**The array is built.** Orientation composes as a list of pieces, each its own
+`PromptPart` and its own block, and producers append to that list rather than
+overwriting a single slot. Two things remain that an array on its own does not
+answer.
 
-Two first use cases, in order of value:
+**Typed blocks beyond text.** `acp.schema` carries `ImageContentBlock`,
+`ResourceLink`, `EmbeddedResourceContentBlock` and `AudioContentBlock`, and the
+initialize response carries `promptCapabilities` saying which of them a backend
+accepts. `_spawn` reads only `load_session` off that object and drops the rest,
+so there is capability negotiation to write, with a text fallback for every
+backend that says no. The motivating case is an attached image arriving as an
+`ImageContentBlock` the model sees directly, rather than a path it must open.
 
-- **System instructions as their own block**, rather than a prefix glued to a
-  user message. This is the one that changes behaviour rather than tidiness:
-  right now a session cannot distinguish an instruction from a request.
-- **An attached image as an `ImageContentBlock`**, so the model sees a
-  screenshot directly instead of being handed a path and having to open it.
-
-Deferred because inbound attachments needed only the path to work, and
-capability negotiation is a separate piece of work with its own fallback
-behaviour to get right.
+**The producers still gluing text together.** Orientation was moved
+deliberately; these were not, and each is a string where structure would do:
+the interrupted-turn notice, the `attached: <path>` lines the tray will add,
+and the re-sent transcript, which is a whole prior conversation flattened into
+one block.
 
 ## Inbound attachments: a per-session tray
 

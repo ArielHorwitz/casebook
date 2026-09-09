@@ -29,5 +29,18 @@ Both checkouts must stay clean, so never edit either one in place.
 
 One operational warning: restarting the daemon kills every agent session it
 is running, including your own turn, whether you restart it with `update.sh`
-or by hand. Detach the restart (`update.sh --detach-restart`, or
-`systemd-run --user --on-active=5 …`) and end your turn.
+or by hand. Detach the restart and end your turn.
+
+`update.sh` is for **production only**, despite its name reading generally. It
+fetches from `origin` and restarts `falconfox-daemon` and
+`falconfox-telegram`, so it cannot restart the dev instance, which runs
+unpushed local `dev` from this checkout under `falconfox-dev-daemon` and
+`falconfox-dev-telegram`. Restart those by hand and detached:
+
+```
+systemd-run --user --collect --unit "falconfox-dev-restart-$(date +%s)" \
+    --on-active=15 systemctl --user restart \
+    falconfox-dev-daemon.service falconfox-dev-telegram.service
+```
+
+For production, `update.sh --detach-restart` does the same thing for you.

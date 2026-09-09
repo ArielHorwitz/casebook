@@ -56,8 +56,14 @@ nowhere to put them.
 2. **Client** (one per client). What that client's surface is and what follows
    from it: for Telegram, forums, topics, tap-to-copy, the constrained
    typing that makes copyable ids matter, and the commands it offers.
-3. **Manager** (role). Owning the session lifecycle.
-4. **Concierge** (role). Getting the user set up.
+3. **Manager** (role, owned by the daemon). Owning the session lifecycle.
+   This is a *builtin* session type, not a Telegram one: managing the daemon's
+   sessions through an agent is useful to every client, and the orientation
+   for it has no client-specific detail in it. Telegram merely has a natural
+   place to put it — the always-on General topic.
+4. **Concierge** (role, owned by the Telegram client). Getting the user set
+   up. This one genuinely is client-specific: it exists because Telegram
+   requires a private chat before a forum can be reached at all.
 
 ### One delivery channel
 
@@ -79,15 +85,23 @@ spawn time, so the daemon holds all of them and composes.
 This reverses an earlier suggestion in the discussion that each client pass
 its own text at spawn. The multi-client argument defeats it.
 
-### Roles are named at spawn
+### Roles are named at spawn, and they compose
 
-The daemon cannot tell that a session is the manager. Spawn grows a role, and
-it **persists in `meta.toml`**, or a resume and a `/clear` will not recompose
+The daemon cannot tell that a session is the manager. Spawn grows roles, and
+they **persist in `meta.toml`**, or a resume and a `/clear` will not recompose
 the same orientation.
 
-Leaning toward one `--role manager|concierge` over separate `--manager` and
-`--concierge` flags: the set is closed, the values are mutually exclusive by
-construction, and a third role costs nothing.
+**Roles are a set, not a choice.** An earlier draft had one mutually exclusive
+`--role manager|concierge`, which bakes in an assumption the daemon has no
+business making: that a client-specific role cannot compose with the manager
+role, or with another client's role. Nothing about the manager conflicts with
+being something else as well. So a session carries zero or more roles and gets
+the orientation for each.
+
+This also fixes where the two roles live. The **manager** is the daemon's own,
+so the daemon carries its text. The **concierge** belongs to Telegram, so
+Telegram carries it, by the same registration route as the client
+orientation.
 
 ### The manager text becomes client-agnostic
 
@@ -121,27 +135,42 @@ has not yet caused trouble.
 concise. Where something is better explained by running a CLI command, it
 *may* be left to the CLI, but that is an option rather than a rule.
 
-## Open: how clients supply their orientation
+## How clients supply their orientation: a file, not a connection
 
-Settled that the daemon composes. **Not** settled how the text gets there.
+The daemon composes, and clients hand it their text by **writing it to a
+shared runtime directory when they initialise**. The daemon reads what is
+there. No protocol action, no connection involved.
 
-- **Hardcode it daemon-side.** Simple. Costs: `falconfox/config.py` ends up
-  carrying forum-and-topic vocabulary, and the text sits far from the code it
-  describes, so `/tray` and its explanation drift apart.
-- **Clients register at connect.** The Telegram bot already holds a websocket
-  to the daemon; it sends its orientation (and its role texts) on connect, the
-  daemon **persists** it, and composition draws on every persisted
-  registration. Persistence is what makes it survive an offline client, which
-  the multi-client requirement demands.
+The alternative considered was registering over the websocket the Telegram bot
+already holds. It was rejected for making orientation depend on process start
+order: a session spawned before a client had connected would silently get an
+incomplete orientation. That is not a hypothetical about today's single
+client so much as the shape of a bug that appears rarely and reads as
+inexplicable when it does — and a feature to enable and disable clients, which
+is plausible, would make it ordinary. A file removes the ordering question
+instead of managing it.
 
-  Worth noting this is close to what the code already does: the manager and
-  concierge texts *already* live in `bot.py`, next to the commands they
-  describe. Registration keeps them there and gives the daemon a way to
-  receive them, instead of the client writing files.
+Secondary virtues: it survives a client restart, it survives transient
+connection trouble, and it can be read with `cat` when something looks wrong.
 
-  Costs: a new protocol action, persisted state, staleness until a client
-  reconnects, and a bootstrap gap where a session spawned before any client
-  ever registered gets only the global piece.
+Two details to settle when building:
+
+- **Read at spawn, not at daemon startup.** Reading once at startup means a
+  client that comes up later needs a daemon restart before its orientation
+  reaches anything. Reading per spawn costs a directory listing.
+- **Where the directory lives.** `XDG_RUNTIME_DIR` is tmpfs, so it self-cleans
+  on reboot and only lists clients that have started since — good for
+  liveness, bad if the daemon spawns something before a client has written.
+  The state directory is durable and has the opposite pair of properties: a
+  removed client leaves its file behind until someone deletes it. Leaning
+  durable, on the grounds that a stale orientation is inspectable and fixable
+  while a missing one is invisible.
+
+The case for this over hardcoding daemon-side is not mainly decoupling. It is
+that the manager and concierge texts **already** live in `bot.py`, next to the
+commands they describe. Hardcoding client text daemon-side would move them
+away from that code, which is a regression from the current state rather than
+a neutral choice.
 
 ## Related work
 
@@ -151,4 +180,5 @@ Settled that the daemon composes. **Not** settled how the text gets there.
 - **`_context_prompt` replaces pending context on resume.** That trade gets
   worse as orientation carries more, and should be revisited here.
 - The **attachment tray** work is paused pending this case, and will need a
-  client-orientation section of its own.
+  client-orientation section of its own. Its design is recorded in
+  [wishlist.md](../../wishlist.md).

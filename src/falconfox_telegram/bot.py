@@ -313,9 +313,31 @@ they never reach you and you cannot run one. `/help` shows them a short list.
 Run `falconfox help telegram.commands` for what each one does, which is what
 you need to answer a question about them or to tell a user which to type.
 
+**Files arrive in a tray, not in a message.** A chat has no compose step: a
+photo is its own message, and an album arrives as several with nothing marking
+the last. So a file the user sends does not reach you on its own. It waits in
+that session's *tray*, and the next real message they write sweeps the tray and
+carries it, as one `attached: <path>` line per file in the order they arrived,
+with any caption the file came with on the same line.
+
+Three things follow, and they are the ones that bite.
+
+1. **A caption is not a message.** If the user sends a photo captioned "what
+   is this?", you get nothing at all, because the caption travels with the
+   file and the album problem is why. They have to write again. The bot tells
+   them so on every file, but if they are waiting on you, that is what
+   happened.
+2. **You are handed a path, so open it.** The file is on this host, under the
+   session's own storage, and it stays there for as long as the session does.
+   You may read it now or twenty turns later.
+3. **The user can drop a file before it reaches you**, with `/tray`, which is
+   also how they see what is waiting. A removed file is deleted.
+
 **A photo may not be the original.** Telegram re-encodes images sent as photos.
 An image you are given may be a degraded copy of something sharper, and asking
 the user to resend it as a *file* rather than a photo gets you the original.
+Nothing is transcribed: a voice message reaches you as an audio file to open,
+not as text.
 """
 
 
@@ -352,6 +374,10 @@ manager in General, or the private chat's own session.
   The forum draws the first tag it has a configured icon for as the topic
   icon. The call replaces the whole list, so tags are carried forward by
   repeating them.
+- `/tray [ids...]` shows the files waiting to be sent with the next
+  message, or removes them by id; `-` clears the lot. Note the sense is the
+  opposite of `/tags`: arguments **remove**, they do not replace. Removing a
+  file deletes it, since it was never going to reach you.
 - `/name <name>` renames the session whose topic it is typed in, and retitles
   the topic to match. Only in a topic: General and the private chat have no
   work session to rename.
@@ -471,6 +497,7 @@ COMMANDS = (
     ("/status", "show daemon status", MANAGEMENT),
     ("/id", "session id", SESSION),
     ("/tags [tags...]", "show or set tags (`-` clears)", SESSION),
+    ("/tray [ids...]", "show waiting files, or remove them (`-` clears)", SESSION),
     ("/stop", "end the turn", SESSION),
     ("/unqueue", "drop the queue", SESSION),
     ("/fullstop", "drop queue and end turn", SESSION),
@@ -1713,6 +1740,9 @@ class FalconFoxTelegramBot:
         if command == "/tags":
             await self._tags_command(dest, parts[1:])
             return True
+        if command == "/tray":
+            await self._tray_command(dest, parts[1:])
+            return True
         if command in ("/stop", "/unqueue", "/fullstop"):
             await self._stop_command(dest, command)
             return True
@@ -1743,6 +1773,62 @@ class FalconFoxTelegramBot:
         # The icon follows from the daemon's session_updated event, so it
         # lands whoever set the tags -- here, the CLI, or the manager.
         await self._say(dest, self._tags_report(session.get("tags") or []))
+
+    async def _tray_command(self, dest: Dest, ids: list[str]) -> None:
+        """Show this session's tray, or remove from it.
+
+        The shape is borrowed from `/tags` and the meaning is inverted:
+        `/tags` arguments replace the set, these remove from it. Removal fits
+        the case that actually happens, which is dropping one bad photo out of
+        five, so the help line says "remove" rather than leaving it to be
+        inferred from the other command.
+        """
+        session_id = self._chat_session(dest)
+        if session_id is None:
+            await self._say(dest, "No FalconFox session speaks in this chat.")
+            return
+        tray = self._trays.get(session_id) or []
+        if not ids:
+            if not tray:
+                await self._say(dest, TRAY_EMPTY)
+                return
+            rich = ["🗂 Waiting for your next message:"]
+            plain = ["🗂 Waiting for your next message:"]
+            for item in tray:
+                caption = f" — {item['caption']}" if item.get("caption") else ""
+                rich.append(f"<code>{html.escape(item['file_id'], quote=False)}</code> "
+                            f"{html.escape(item['name'] + caption, quote=False)}")
+                plain.append(f"{item['file_id']} {item['name']}{caption}")
+            await self._say_html(dest, "\n".join(rich), "\n".join(plain))
+            return
+        # `-` deletes the bytes with no grace period. Recovering a mistaken
+        # clear was considered and rejected: a deliberate `-` does not warrant
+        # the complexity, and nothing here is irreplaceable -- the user still
+        # has whatever they sent.
+        dropped = tray if ids == ["-"] else [item for item in tray
+                                             if item["file_id"] in set(ids)]
+        for item in dropped:
+            try:
+                # Deleted rather than merely unlisted: a file dropped from the
+                # tray is never going to reach the agent, so nothing is left
+                # to keep.
+                await self.daemon.remove_file(session_id, item["file_id"])
+            except ApiError:
+                log.warning("could not delete tray file %s", item["file_id"],
+                            exc_info=True)
+            await self._react(dest, item.get("message_id"), REACT_DISCARDED)
+        remaining = [item for item in tray if item not in dropped]
+        if remaining:
+            self._trays[session_id] = remaining
+        else:
+            self._trays.pop(session_id, None)
+        self._persist_tray()
+        if not dropped:
+            await self._say(dest, f"Nothing in the tray with {'that id' if len(ids) == 1 else 'those ids'}.")
+            return
+        await self._say(dest, f"🗑 Removed {len(dropped)} file(s). "
+                        + (f"{len(remaining)} still waiting." if remaining
+                           else "The tray is empty."))
 
     def _tags_report(self, tags: list[str]) -> str:
         """What the tags are, and which of them is the one being drawn."""

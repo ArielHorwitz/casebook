@@ -8,8 +8,10 @@ the repositories in which agents work.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tomllib
+import uuid
 from pathlib import Path
 
 from . import logsetup
@@ -19,6 +21,17 @@ log = logsetup.get_logger("storage")
 
 META_FILENAME = "meta.toml"
 TRANSCRIPT_FILENAME = "transcript.jsonl"
+INBOX_DIRNAME = "inbox"
+# Long enough to read as an address and short enough to type on a phone, which
+# is where these are tapped. The same width as a session id, for the same
+# reason.
+FILE_ID_WIDTH = 8
+# A stored name is decoration with one hard requirement: it must be a single
+# path component. Everything a filesystem or a shell would rather not see goes,
+# and the length cap is about a phone screen rather than about any limit.
+_UNSAFE_IN_NAME = re.compile(r"[\x00-\x1f/\\]")
+_NAME_LIMIT = 120
+_FALLBACK_NAME = "file"
 
 
 class SessionStore:
@@ -54,6 +67,66 @@ class SessionStore:
         tmp.write_text("".join(json.dumps(event) + "\n" for event in events))
         tmp.replace(transcript_path)
 
+    # --- the inbox: files given to a session from outside it ---------------
+    #
+    # A directory per file rather than an id for a filename, so collisions are
+    # impossible while the real name survives intact: `prod-error.log` says
+    # something that `a1b2c3d4.log` does not, and renaming would have to guess
+    # at extensions like `.tar.gz`.
+    #
+    # The directory is the whole of the state. The id is its name, the file's
+    # name is its filename, and when it arrived is its mtime, so there is no
+    # record to keep in step with any of them. Anything else about a file --
+    # the caption it came with, whether it has been handed over yet -- belongs
+    # to whichever client received it, and stays there.
+
+    def inbox_dir(self, session_id: str) -> Path:
+        return self._session_dir(session_id).joinpath(INBOX_DIRNAME)
+
+    def add_file(self, session_id: str, source: Path, name: str) -> tuple[str, Path]:
+        """Copy a file into the session's inbox. Returns its id and path.
+
+        Copied rather than moved: the caller may still want what it handed
+        over, exactly as outbound `attach` does not consume what it sends.
+        """
+        inbox = self.inbox_dir(session_id)
+        inbox.mkdir(parents=True, exist_ok=True)
+        while True:
+            file_id = uuid.uuid4().hex[:FILE_ID_WIDTH]
+            try:
+                # Refusing to reuse a directory is what makes the id unique,
+                # rather than a lookup that another caller could race.
+                inbox.joinpath(file_id).mkdir()
+                break
+            except FileExistsError:
+                continue
+        stored = inbox.joinpath(file_id, safe_filename(name))
+        shutil.copyfile(source, stored)
+        log.info("inbox add: session=%s file=%s name=%s bytes=%d",
+                 session_id, file_id, stored.name, stored.stat().st_size)
+        return file_id, stored
+
+    def remove_file(self, session_id: str, file_id: str) -> bool:
+        """Delete one stored file. False if there was nothing to delete."""
+        if not _is_file_id(file_id):
+            return False
+        directory = self.inbox_dir(session_id).joinpath(file_id)
+        if not directory.is_dir():
+            return False
+        shutil.rmtree(directory)
+        log.info("inbox remove: session=%s file=%s", session_id, file_id)
+        return True
+
+    def clear_files(self, session_id: str) -> int:
+        """Delete every stored file. Returns how many there were."""
+        inbox = self.inbox_dir(session_id)
+        if not inbox.is_dir():
+            return 0
+        count = sum(1 for child in inbox.iterdir() if child.is_dir())
+        shutil.rmtree(inbox)
+        log.info("inbox clear: session=%s files=%d", session_id, count)
+        return count
+
     def load_all_meta(self) -> list[dict]:
         """Read every session's small metadata file, never its transcript."""
         if not self.root.exists():
@@ -73,6 +146,23 @@ class SessionStore:
 
     def read_transcript(self, session_id: str) -> list[dict]:
         return _read_transcript(self._session_dir(session_id).joinpath(TRANSCRIPT_FILENAME))
+
+
+def safe_filename(name: str) -> str:
+    """Reduce a name from anywhere to one harmless path component.
+
+    The id directory already makes collisions impossible, so this is not about
+    uniqueness. It is about a name that arrived over the network being used as
+    a filename at all.
+    """
+    cleaned = _UNSAFE_IN_NAME.sub("", (name or "").strip()).strip(". ")
+    return cleaned[:_NAME_LIMIT] or _FALLBACK_NAME
+
+
+def _is_file_id(file_id: str) -> bool:
+    """Guard the one place an id becomes a path: `..` must not address a
+    session's transcript, and no id this store hands out looks like that."""
+    return bool(file_id) and all(character in "0123456789abcdef" for character in file_id)
 
 
 def _read_transcript(path: Path) -> list[dict]:

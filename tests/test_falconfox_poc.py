@@ -144,6 +144,108 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("transcripts", snapshot)
 
 
+class FileStoreTests(unittest.IsolatedAsyncioTestCase):
+    """Per-session file storage: the daemon's half of inbound attachments.
+
+    It stores and it deletes, and it decides nothing about when a file
+    reaches the agent. What it does own is the lifetime.
+    """
+
+    async def asyncSetUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.config_home = tempfile.TemporaryDirectory()
+        self.addCleanup(self.config_home.cleanup)
+        self.env = patch.dict(os.environ, {"XDG_CONFIG_HOME": self.config_home.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.coordinator = SessionCoordinator(Path(self.temporary.name))
+        self.coordinator._metadata["work"] = {
+            "session_id": "work", "name": "work", "path": "/tmp", "backend": "echo",
+            "always_allow": True, "ephemeral": False, "state": "idle", "live": True,
+            "created": "1", "last_active": "1",
+        }
+        self.source = Path(self.temporary.name, "download")
+        self.source.write_bytes(b"payload")
+
+    def add(self, name="prod-error.log"):
+        return self.coordinator.add_file("work", str(self.source), name)
+
+    async def test_the_name_survives_and_the_id_is_the_directory(self):
+        # The point of a directory per file: `prod-error.log` says something
+        # that `a1b2c3d4.log` does not, and nothing has to rename it.
+        added = self.add()
+        stored = Path(added["path"])
+        self.assertEqual(stored.name, "prod-error.log")
+        self.assertEqual(stored.parent.name, added["file_id"])
+        self.assertEqual(stored.read_bytes(), b"payload")
+
+    async def test_the_same_name_twice_does_not_collide(self):
+        first, second = self.add(), self.add()
+        self.assertNotEqual(first["path"], second["path"])
+        self.assertTrue(Path(first["path"]).exists())
+        self.assertTrue(Path(second["path"]).exists())
+
+    async def test_adding_copies_rather_than_consuming_the_source(self):
+        # `attach` does not consume what it sends, and `add` is its mirror:
+        # the caller may still want the file it handed over.
+        self.add()
+        self.assertTrue(self.source.exists())
+
+    async def test_a_name_from_the_network_becomes_one_path_component(self):
+        stored = Path(self.add("../../meta.toml")["path"])
+        self.assertEqual(stored.name, "meta.toml")
+        self.assertEqual(stored.parent.parent.name, "inbox")
+
+    async def test_a_name_that_survives_nothing_still_yields_a_file(self):
+        self.assertEqual(Path(self.add("///")["path"]).name, "file")
+
+    async def test_removing_deletes_the_bytes(self):
+        # A file dropped from the tray is never going to reach the agent, so
+        # there is nothing left to keep.
+        added = self.add()
+        self.assertEqual(self.coordinator.remove_file("work", added["file_id"]),
+                         {"removed": 1})
+        self.assertFalse(Path(added["path"]).exists())
+        self.assertEqual(self.coordinator.remove_file("work", added["file_id"]),
+                         {"removed": 0})
+
+    async def test_an_id_cannot_address_anything_but_a_stored_file(self):
+        self.add()
+        meta = Path(self.temporary.name, "work", "meta.toml")
+        meta.write_text("keep = true\n")
+        self.assertEqual(self.coordinator.remove_file("work", "../.."), {"removed": 0})
+        self.assertTrue(meta.exists())
+
+    async def test_clearing_takes_the_lot(self):
+        self.add()
+        self.add("second.txt")
+        self.assertEqual(self.coordinator.clear_files("work"), {"removed": 2})
+        self.assertEqual(self.coordinator.clear_files("work"), {"removed": 0})
+
+    async def test_deleting_the_session_takes_its_files(self):
+        # The reason the store is the daemon's: no client has to watch for
+        # this, get it right, or leak the files of a session deleted while it
+        # was not running.
+        added = self.add()
+        await self.coordinator.delete_session("work")
+        self.assertFalse(Path(added["path"]).exists())
+
+    async def test_an_ephemeral_session_has_nowhere_to_put_a_file(self):
+        self.coordinator._metadata["throwaway"] = {
+            **self.coordinator._metadata["work"],
+            "session_id": "throwaway", "ephemeral": True,
+        }
+        with self.assertRaises(FalconFoxError):
+            self.coordinator.add_file("throwaway", str(self.source))
+
+    async def test_an_unknown_session_and_a_missing_file_both_refuse(self):
+        with self.assertRaises(FalconFoxError):
+            self.coordinator.add_file("nobody", str(self.source))
+        with self.assertRaises(FalconFoxError):
+            self.coordinator.add_file("work", str(self.source) + ".missing")
+
+
 class LiveSessionCapTests(unittest.IsolatedAsyncioTestCase):
     """A ceiling on sessions holding a live agent subprocess.
 

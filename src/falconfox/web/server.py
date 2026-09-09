@@ -141,6 +141,36 @@ def create_app(
             log.debug("session action failed: %s %s", session_id, action, exc_info=True)
             return JSONResponse({"error": str(error)}, status_code=500)
 
+    async def session_files(request: Request) -> JSONResponse:
+        """The session's file store: add one, or clear the lot.
+
+        Its own routes rather than another `action`, because removal is a
+        DELETE and the action route is POST-only. The store is the one part of
+        a session with a resource of its own to address.
+        """
+        session_id = request.path_params["session_id"]
+        try:
+            if request.method == "DELETE":
+                coordinator.log.info("action=clear_files via=http session=%s", session_id)
+                return JSONResponse(coordinator.clear_files(session_id))
+            body = await request.json()
+            coordinator.log.info("action=add_file via=http session=%s name=%s",
+                                 session_id, body.get("name"))
+            return JSONResponse(coordinator.add_file(
+                session_id, body.get("path", ""), body.get("name")), status_code=201)
+        except (FalconFoxError, OSError) as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+
+    async def session_file(request: Request) -> JSONResponse:
+        session_id = request.path_params["session_id"]
+        file_id = request.path_params["file_id"]
+        coordinator.log.info("action=remove_file via=http session=%s file=%s",
+                             session_id, file_id)
+        try:
+            return JSONResponse(coordinator.remove_file(session_id, file_id))
+        except (FalconFoxError, OSError) as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+
     async def backends_endpoint(_request: Request) -> JSONResponse:
         return JSONResponse(coordinator.list_backends())
 
@@ -167,6 +197,12 @@ def create_app(
             Route("/api/version", version_endpoint),
             Route("/api/sessions", sessions_endpoint, methods=["GET", "POST"]),
             Route("/api/sessions/{session_id}", session_endpoint, methods=["GET", "DELETE"]),
+            # Before the catch-all action route, which would otherwise
+            # answer POST /files as an unknown action.
+            Route("/api/sessions/{session_id}/files", session_files,
+                  methods=["POST", "DELETE"]),
+            Route("/api/sessions/{session_id}/files/{file_id}", session_file,
+                  methods=["DELETE"]),
             Route("/api/sessions/{session_id}/{action}", session_action, methods=["POST"]),
             Route("/api/backends", backends_endpoint),
             Route("/api/hotkeys", hotkeys),

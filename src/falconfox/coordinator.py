@@ -774,6 +774,45 @@ class SessionCoordinator:
             return  # already timed out, or never waited for
         waiter.set_result({"ok": ok, "error": error})
 
+    # --- the inbox -----------------------------------------------------
+    #
+    # Files given to a session from outside it, the counterpart to `attach`.
+    # The daemon stores them and nothing more: it does not decide when one
+    # reaches the agent, because the client is what composes a prompt.
+    #
+    # What the daemon owns here is the lifetime. A session's files live inside
+    # its own directory, so deleting the session takes them with it and no
+    # client has to watch for that, get it right, or leak the files of every
+    # session deleted while it happened to be down.
+
+    def add_file(self, session_id: str, path: str,
+                 name: Optional[str] = None) -> dict:
+        """Copy a file into the session's store. Returns its id and path.
+
+        `name` is what to store it under, for a caller holding a download
+        whose own filename means nothing.
+        """
+        meta = self._require(session_id)
+        if meta.get("ephemeral"):
+            # Ephemeral means nothing on disk, so there is nowhere to put it
+            # and nothing that would ever clean it up.
+            raise FalconFoxError("an ephemeral session has no file store")
+        source = Path(path).expanduser()
+        if not source.is_file():
+            raise FalconFoxError(f"not a file: {source}")
+        file_id, stored = self.store.add_file(session_id, source, name or source.name)
+        return {"file_id": file_id, "path": str(stored), "name": stored.name}
+
+    def remove_file(self, session_id: str, file_id: str) -> dict:
+        """Delete one stored file, by the id `add_file` returned."""
+        self._require(session_id)
+        return {"removed": int(self.store.remove_file(session_id, file_id))}
+
+    def clear_files(self, session_id: str) -> dict:
+        """Delete every file stored for a session."""
+        self._require(session_id)
+        return {"removed": self.store.clear_files(session_id)}
+
     async def cancel(self, session_id: str) -> None:
         self._require(session_id)
         session = self.sessions.get(session_id)

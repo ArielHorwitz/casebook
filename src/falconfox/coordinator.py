@@ -611,7 +611,13 @@ class SessionCoordinator:
                 # Loud, because a role with no text is a session that believes
                 # it has a job nobody described to it.
                 self.log.warning("no orientation registered for role %r", role)
-        return pieces
+        # Every piece ends with a newline. Blocks arrive at a backend as an
+        # array and are joined by it, so a piece ending mid-line runs into the
+        # next one's heading -- seen in a live session as
+        # "...Telegram commands# Talking through Telegram". Guaranteed here
+        # rather than asked of each author, since registered files are read
+        # stripped and their authors are other people's clients.
+        return [piece.rstrip() + "\n" for piece in pieces]
 
     def _help_index(self) -> str:
         """The lookup table, appended to the global piece.

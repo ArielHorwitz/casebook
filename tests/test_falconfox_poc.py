@@ -1836,11 +1836,12 @@ class SessionContextTests(unittest.IsolatedAsyncioTestCase):
             coordinator = self._coordinator(directory, session, roles=[".manager"])
             await coordinator.send(session.session_id, "hello")
             pieces = [part.text for part in session.sent[0]]
-            self.assertIn(config.SESSION_CONTEXT, pieces)
-            self.assertIn(config.MANAGER_ORIENTATION, pieces)
+            joined = "".join(pieces)
+            self.assertIn(config.SESSION_CONTEXT.rstrip(), joined)
+            self.assertIn(config.MANAGER_ORIENTATION.rstrip(), joined)
             # Global first, then the role, then the user.
-            self.assertLess(pieces.index(config.SESSION_CONTEXT),
-                            pieces.index(config.MANAGER_ORIENTATION))
+            self.assertLess(joined.index("Running under FalconFox"),
+                            joined.index("Session manager"))
             self.assertEqual(pieces[-1], "hello")
 
     async def test_an_unknown_role_is_a_warning_not_a_failure(self):
@@ -1867,7 +1868,7 @@ class SessionContextTests(unittest.IsolatedAsyncioTestCase):
 
             await coordinator.send(session.session_id, "hello")
             texts = [part.text for part in session.sent[0]]
-            self.assertIn(config.SESSION_CONTEXT, texts)
+            self.assertIn(config.SESSION_CONTEXT.rstrip() + "\n", texts)
             self.assertTrue(any("resuming a previous session" in text
                                 for text in texts))
 
@@ -2148,11 +2149,12 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
             coordinator = SessionCoordinator(Path(directory))
             with patch.object(falconfox_state, "clients_dir", return_value=clients):
                 pieces = coordinator._orientation([])
-            self.assertIn("about telegram", pieces)
-            self.assertIn("about the web", pieces)
+            joined = "".join(pieces)
+            self.assertIn("about telegram", joined)
+            self.assertIn("about the web", joined)
             # Deterministic order, by directory name.
-            self.assertLess(pieces.index("about telegram"),
-                            pieces.index("about the web"))
+            self.assertLess(joined.index("about telegram"),
+                            joined.index("about the web"))
 
     def test_a_role_resolves_through_the_client_that_registered_it(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2163,8 +2165,8 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(falconfox_state, "clients_dir", return_value=clients):
                 pieces = coordinator._orientation(["web.concierge"])
             # Two clients can both offer a "concierge" without meeting.
-            self.assertIn("web setup", pieces)
-            self.assertNotIn("tg setup", pieces)
+            self.assertIn("web setup", "".join(pieces))
+            self.assertNotIn("tg setup", "".join(pieces))
 
     def test_the_daemons_own_role_takes_the_empty_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2174,9 +2176,22 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(falconfox_state, "clients_dir", return_value=clients):
                 dotted = coordinator._orientation([".manager"])
                 bare = coordinator._orientation(["manager"])
-            self.assertIn(config.MANAGER_ORIENTATION, dotted)
+            self.assertIn(config.MANAGER_ORIENTATION.rstrip() + "\n", dotted)
             # A bare name is read as the daemon's, so --role manager works too.
             self.assertEqual(dotted, bare)
+
+    def test_every_piece_ends_with_a_newline(self):
+        # Blocks are joined by the backend, so a piece ending mid-line runs
+        # into the next one's heading. Seen live as
+        # "...Telegram commands# Talking through Telegram".
+        with tempfile.TemporaryDirectory() as directory:
+            clients = Path(directory).joinpath("clients")
+            self._write_client(clients, "telegram", orientation="no trailing newline",
+                               roles={"concierge": "nor here"})
+            coordinator = SessionCoordinator(Path(directory))
+            with patch.object(falconfox_state, "clients_dir", return_value=clients):
+                pieces = coordinator._orientation(["telegram.concierge", ".manager"])
+            self.assertTrue(all(piece.endswith("\n") for piece in pieces))
 
     def test_a_missing_client_directory_still_yields_the_global_piece(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2184,7 +2199,7 @@ class ClientOrientationCompositionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(falconfox_state, "clients_dir",
                               return_value=Path(directory).joinpath("nope")):
                 self.assertEqual(coordinator._orientation([]),
-                                 [config.SESSION_CONTEXT])
+                                 [config.SESSION_CONTEXT.rstrip() + "\n"])
 
 
 class HelpModuleTests(unittest.TestCase):

@@ -206,13 +206,57 @@ commands they describe. Hardcoding client text daemon-side would move them
 away from that code, which is a regression from the current state rather than
 a neutral choice.
 
+## Resume: the orientation is lost today
+
+`_pending_context` is a single slot holding what gets prepended to the next
+prompt. At spawn it holds the orientation. On resume, when the backend cannot
+load a session natively and a transcript exists, `_context_prompt` **replaces**
+it with the prior conversation.
+
+The comment justifying that replacement says the transcript "contains it
+already if it was ever delivered". It does not. `send` passes `display_text`
+so orientation stays out of the visible transcript, and `_transcript_text`
+reads exactly those visible messages. Orientation is delivered once, never
+recorded, and then replaced. The daemon's own notice — "Context re-sent from
+saved transcript imperfectly" — has fired twice on the dev instance, so this
+is a path that runs.
+
+It matters more after this case than before it. Today the manager and
+concierge read their orientation from `AGENTS.md`, which a resume cannot lose,
+because the runtime reads the file again. Removing the file mechanism removes
+that. A resumed manager would lose its entire job description rather than six
+generic bullets, and silently.
+
+**Decided.**
+
+1. **Pending context becomes a list**, delivered as an array of content
+   blocks. Producers add rather than overwrite, so no future producer can
+   silently displace another.
+2. **Orientation goes into the transcript.** It is text the session receives
+   in the user's voice, and everything a session sees belongs in its
+   transcript. That makes the resume path correct for free: re-sending the
+   transcript now genuinely does carry the orientation.
+3. **Orientation is not re-sent on every resume.** Cheap, but a session may be
+   stopped and resumed between every message, which would make it constant
+   noise.
+
+**One detail still to settle.** `_transcript_text` skips events marked
+`system`, so recording orientation as a system message would exclude it from
+the very re-send that is supposed to carry it. Orientation should be a
+`user`-role event with a marker that clients honour by not displaying it —
+emitted as its own event rather than by widening the user's message event with
+a second text field. Clients hide it for now; showing it is a later choice,
+not a constraint.
+
 ## Related work
 
-- **`ed379c4`** wishlists using more than one prompt content block. Orientation
-  composes by concatenation into a single `text_block` today. Real blocks would
-  change how it is packed, not what is said, so this case is not blocked on it.
-- **`_context_prompt` replaces pending context on resume.** That trade gets
-  worse as orientation carries more, and should be revisited here.
+- **`ed379c4`** wishlists using more than one prompt content block. **Pulled
+  into this case**: orientation is a list of pieces, and a list of pieces
+  wants a list of blocks. Concatenating them into one `text_block` would work,
+  but the whole difficulty below is what happens when one producer overwrites
+  another's single slot, and an array is what stops that being possible.
+- **`_context_prompt` replaces pending context on resume.** Settled below; it
+  turned out to be a live fault rather than a future risk.
 - The **attachment tray** work is paused pending this case, and will need a
   client-orientation section of its own. Its design is recorded in
   [wishlist.md](../../wishlist.md).

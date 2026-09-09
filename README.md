@@ -14,8 +14,8 @@ removed the navigation they were built on.
 The daemon binds loopback and expects to be reached through a co-located
 client, so remote authentication is not planned — Telegram *is* the remote
 access. Voice input and rewiring the web UI are wanted but deferred; see
-[docs/wishlist.md](docs/wishlist.md) for those and [docs/bugs.md](docs/bugs.md)
-for what is known broken.
+[docs/wishlist.md](docs/wishlist.md) for those and
+[docs/buglist.md](docs/buglist.md) for what is known broken.
 
 ## Install and configure
 

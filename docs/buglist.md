@@ -1,4 +1,4 @@
-# Known bugs
+# Buglist
 
 Defects that are known and not yet fixed. An entry here is a thing that is
 **wrong**, as opposed to [wishlist.md](wishlist.md), which is a thing that is

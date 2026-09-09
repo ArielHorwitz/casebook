@@ -6,7 +6,7 @@ doing now**, with the reason, rather than forgotten.
 
 Keep entries short and honest about status. When something is picked up, delete
 the entry; the reason it was wanted belongs in whatever case takes it on. See
-[bugs.md](bugs.md) for things that are broken rather than missing.
+[buglist.md](buglist.md) for things that are broken rather than missing.
 
 ## Desktop client — rewire the web UI onto flat sessions
 

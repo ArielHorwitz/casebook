@@ -60,7 +60,7 @@ The case's real question is (2). Fix (1) first because it is cheap and it stops
 the bleeding, then decide what turn feedback should actually be.
 
 Filed detail, written while the falconfox case was closing:
-[docs/bugs.md](../../bugs.md) ("The typing indicator dies on one transient
+[docs/buglist.md](../../buglist.md) ("The typing indicator dies on one transient
 Telegram error") and [docs/wishlist.md](../../wishlist.md) ("Tell the user what
 a session is actually doing"). Both entries carry context this case should not
 re-derive — in particular the two earlier decisions that look like bugs and are
@@ -87,7 +87,7 @@ Fix: survive `ApiError` in the loop, and treat a `done()` task as absent.
 
 **Do not undo two earlier decisions** (both from the first phone session; the
 first is also commented at its site in `bot.py`, the second lives only here now
-that the fixed bug has left bugs.md): typing starts in `_forward()` rather than on
+that the fixed bug has left buglist.md): typing starts in `_forward()` rather than on
 `agent_state: working` because the daemon reports a resuming ACP subprocess as
 `state: starting` on an event this client ignores, and cancelling typing on an
 error notice was considered and rejected because `_warn_option` emits

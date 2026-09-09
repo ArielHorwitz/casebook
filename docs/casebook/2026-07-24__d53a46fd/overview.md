@@ -21,7 +21,7 @@ The pivot is committed: the package is `falconfox`, the repo is
 Closed does not mean everything was built. It means every thread was
 **disposed of** — done, or dropped with a reason, or moved somewhere that
 outlives the case. Deferred work lives in [docs/wishlist.md](../../wishlist.md)
-(missing) and [docs/bugs.md](../../bugs.md) (broken), which is what makes
+(missing) and [docs/buglist.md](../../buglist.md) (broken), which is what makes
 closing honest rather than a way of dropping threads. Dogfooding continues from
 Telegram, across this project and others; findings get their own cases.
 
@@ -156,7 +156,7 @@ Code and delivery — all done:
       keeps the old URL — it records what was executed, and GitHub redirects.
 
 **Where deferred work goes.** Two new files, [docs/wishlist.md](../../wishlist.md)
-and [docs/bugs.md](../../bugs.md), now hold what this case pushes forward —
+and [docs/buglist.md](../../buglist.md), now hold what this case pushes forward —
 missing things and broken things respectively. They exist so that closing the
 case does not lose the work it deliberately chose not to do: an item there has
 been *decided against for now, with the reason*, rather than forgotten. This is
@@ -191,7 +191,7 @@ Open threads, all now disposed of:
 - **The typing indicator** — reported intermittent again at the very end of the
   case, and filed rather than fixed: `_typing_loop` dies on one transient
   Telegram error and `_start_typing`'s guard reads the dead task as live, so
-  nothing restarts it. In [bugs.md](../../bugs.md), with the two earlier
+  nothing restarts it. In [buglist.md](../../buglist.md), with the two earlier
   decisions that must not be undone by a naive fix. The UX half — no way to
   tell idle from working from stuck — is in
   [wishlist.md](../../wishlist.md). A fitting last finding: the case closes the

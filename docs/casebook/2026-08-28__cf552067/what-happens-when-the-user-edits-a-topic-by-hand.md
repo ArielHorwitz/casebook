@@ -65,7 +65,7 @@ non-admin member would block it outright.
 
 Closing costs a second, fragile representation of what the capacity notice
 already says; bookkeeping that must survive restarts and currently does not
-(see [bugs.md](../../bugs.md)); the ambiguity above; and calls against a
+(see [buglist.md](../../buglist.md)); the ambiguity above; and calls against a
 rate-limited surface.
 
 It buys exactly one thing the notice does not: **persistence**. A notice

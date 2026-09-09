@@ -152,7 +152,7 @@ just know the reason and motive without a playbook."
 
 **Motive, not playbook, and the project has already proved why.** The
 `falconfox-pointer` skill described a pointer that stopped existing halfway
-through the work that replaced it, and [bugs.md](../../bugs.md) recorded that
+through the work that replaced it, and [buglist.md](../../buglist.md) recorded that
 a stale skill is not merely useless but *actively harmful* — the agent
 discovers both the old and the new and follows conflicting instructions.
 Telegram's own blog still says Topics require 100 members; a one-member group

@@ -44,7 +44,7 @@ Picked up next by a session on the **fable backend**, working alone in
 **One change lives outside git:** `[backends.fable]` in
 `~/.config/falconfox/config.toml`, carrying
 `ANTHROPIC_MODEL=claude-fable-5`. It is the same shape of hazard as the Python
-3.12 shim in [bugs.md](../../bugs.md) — a host-side edit with no commit behind
+3.12 shim in [buglist.md](../../buglist.md) — a host-side edit with no commit behind
 it, which a rebuilt host silently loses. Mitigated by documenting it as a
 commented example in `deploy/config.example.toml`, so the recipe survives even
 though the value does not.

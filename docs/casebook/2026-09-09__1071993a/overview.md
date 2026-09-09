@@ -240,13 +240,96 @@ generic bullets, and silently.
    stopped and resumed between every message, which would make it constant
    noise.
 
-**One detail still to settle.** `_transcript_text` skips events marked
-`system`, so recording orientation as a system message would exclude it from
-the very re-send that is supposed to carry it. Orientation should be a
-`user`-role event with a marker that clients honour by not displaying it —
-emitted as its own event rather than by widening the user's message event with
-a second text field. Clients hide it for now; showing it is a later choice,
-not a constraint.
+**The marker already exists and is unused.** `AgentSession.send` accepts a
+`system` flag and stamps it onto the message event, and nothing in the
+codebase ever passes it. The web UI already renders such events as a distinct
+bubble; `_transcript_text` already skips them. Both are dead code guarding
+against events nothing produces.
+
+So orientation adopts `system: true` rather than inventing a marker, and
+`_transcript_text` stops excluding it — an exclusion that was harmless while
+nothing produced these events and would be exactly backwards once orientation
+does.
+
+Worth being clear that `system` is **ours, not ACP's**. ACP's `Role` enum is
+`user` and `assistant` only, and `PromptRequest` carries no role or system
+marker: a prompt simply is the user turn. The flag governs how our own clients
+display an event and how we rebuild transcripts, and changes nothing about
+what the agent receives. Clients hide it for now; showing it is a later
+choice, not a constraint.
+
+## Client orientation and client roles are different things
+
+They arrive by the same route and are delivered on opposite terms, so the
+distinction is worth stating plainly.
+
+**A client orientation is unconditional.** Every session gets every client's,
+always, because a session may be started in one client and spoken to through
+another later. It describes a surface: what a forum and a topic are, that ids
+are worth making tappable because typing on a phone is expensive, what the
+commands do.
+
+**A role orientation is conditional.** Only a session carrying that role gets
+it. It describes a job: owning the session lifecycle, or walking a user
+through setup.
+
+The two also have different owners. **`manager` is the daemon's own role** —
+managing the daemon's sessions through an agent is useful to every client, and
+its text has no client-specific detail in it. **`concierge` is Telegram's**,
+and exists only because Telegram requires a private chat before a forum can be
+reached. A client registers its orientation and its roles in the same file.
+
+### Role names are namespaced by their owner
+
+A second client wanting its own "concierge" must not collide with Telegram's.
+Rather than detect that and error, make it impossible: **a client's roles are
+prefixed with the client's name**, so Telegram declares `telegram:concierge`
+and the daemon's own roles are bare (`manager`).
+
+Collisions then cannot occur, ownership is legible from the name alone, and
+the daemon never has to arbitrate between two clients — which suits a daemon
+whose whole knowledge of a role is "name, text, supplied by whoever registered
+it".
+
+The one rule left to enforce is that a client may only declare roles under its
+own prefix. Anything else is **rejected loudly at read time**, naming the
+offending client. That is a complaint about one misbehaving client rather than
+an ambiguous conflict between two, and in particular it stops a client
+shadowing `manager`.
+
+## Implementation plan
+
+In dependency order. Steps 1 and 2 are independent of each other.
+
+1. **Content blocks.** `AgentSession.send` takes a list of blocks instead of
+   one string. `_pending_context` becomes a list per session, appended to and
+   never overwritten. Orientation is emitted as its own message event with
+   `role: user` and `system: true`, and `_transcript_text` stops excluding
+   system events.
+2. **Registration.** The daemon creates
+   `$XDG_RUNTIME_DIR/falconfox/run-<pid>/clients/` at startup, publishes the
+   path in `server.json`, and removes sibling run directories. It reads that
+   directory per spawn. The Telegram bot writes its file at startup and on
+   every connect.
+3. **Composition.** Spawn grows roles as a set, persisted in `meta.toml`.
+   Orientation is global + every client orientation present + the text for
+   each of the session's roles.
+4. **The texts.** Today's `SESSION_CONTEXT` becomes the global piece. A new
+   Telegram client piece covers forums, topics, tap-to-copy, the commands,
+   tags, and the photo re-encoding note. The manager piece is rewritten
+   client-agnostic and moves into the daemon. The concierge piece moves as it
+   stands into Telegram's registration file.
+5. **Remove the file mechanism.** `_prepare_workspace` and its two callers go.
+   The workspaces remain as working directories.
+6. **Resume.** `_context_prompt` appends rather than replaces. Orientation
+   rides the transcript, so nothing extra is sent on resume.
+7. **Tests, README, and the wishlist entry** for content blocks, which is
+   narrowed rather than deleted: this case takes the array, not the typed
+   blocks or the capability negotiation.
+
+Two consequences to expect. Existing sessions keep their old orientation until
+`/clear`, which is accepted. And `system: true`, dead until now, goes live and
+changes how the web UI renders those events.
 
 ## Related work
 

@@ -11,8 +11,8 @@ ownership of a lifetime against ownership of a user interface.
 
 Designed in discussion 2026-09-08/09, paused behind the orientation case
 ([2026-09-09__1071993a](../2026-09-09__1071993a/overview.md)) because a session
-only learns any of this through orientation. That case has landed. Nothing
-below is built.
+only learns any of this through orientation. That case has landed. **Built and
+proven in use, 2026-09-09**; see the two sections at the end.
 
 ## Where it stands today
 
@@ -335,3 +335,46 @@ In dependency order. Steps 1 and 2 are independent of each other.
 - **The orientation case**
   ([2026-09-09__1071993a](../2026-09-09__1071993a/overview.md)) is what this
   waited for, and is the reason the tray can be explained to a session at all.
+
+
+## Built (2026-09-09)
+
+Five commits on `dev`, in the order the plan set out, and the plan held. Four
+things came out differently and each is worth a line.
+
+**`getFile` split from the download.** The plan had one call. It has to be two,
+because the remote path Telegram returns carries the only extension a photo
+ever has, and the caller needs that *before* deciding what to store the file
+under. So `file_path` answers where a file is and `download` fetches it, and
+the naming rule has something to read.
+
+**The store got routes of its own** rather than another `action` on the
+POST-only action route, since removing a file is a DELETE. It is the one part
+of a session with a resource of its own to address.
+
+**The global orientation piece was left alone**, against the plan, which had it
+owing a line about the store. It does not: the store is reachable only through
+a client, so a session with no client would be told about files it can never be
+given. What an agent needs is that a path it was handed stays valid, and that
+sits beside the tray text where the paths come from.
+
+**The catch-all refusal changed** from "Text messages only in this PoC." to "I
+can take files, but not that.", which is now the true statement. It is what a
+sticker gets.
+
+Verified end to end against a real daemon before the merge, not only against
+the test fakes: a traversal in a filename is reduced to a basename, `add`
+leaves the source where it was, an ephemeral session is refused, and deleting
+the session takes its files with it.
+
+## First live use (user, 2026-09-09)
+
+Works, from the phone, on the first try.
+
+**The receipt-noise question is closed rather than deferred.** It was the one
+judgement this case deliberately left to use: a receipt per file means an album
+of five is five messages on a phone screen. In practice the user does not send
+large albums, so the noise never materialises. That retires both of the
+settings floated for it, and with them the need for a Telegram configuration
+file to hold them. Should the habit change, the section above records what the
+two options were and why neither was guessed at in advance.

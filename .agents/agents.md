@@ -3,8 +3,8 @@
 ## Branches
 
 `dev` is the development branch: everything lands there first, including
-documentation and one-line fixes. `master` is the stable production branch,
-and it lags behind `dev` at a commit that has been proven in use.
+documentation and one-line fixes. `master` is the stable branch, and it lags
+behind `dev` at a commit that has been proven in use.
 
 The invariant is that **`master` never diverges from `dev`**: it is always a
 direct ancestor of it. That means nothing is ever committed to `master`
@@ -38,9 +38,11 @@ See the entry in [docs/wishlist.md](../docs/wishlist.md).
 where you are, and it is what the dev instance runs. Work in a worktree under
 `.worktrees/`, branched from `dev`, and merge back into `dev`.
 
-`~/projects/falconfox-prod` is the production checkout, on `master`, and is
-the only thing a deployment runs. Do not develop in it and do not commit
-there: it moves by fast-forward alone.
+`~/projects/falconfox-stable` is the stable checkout, on `master`, and is the
+only thing a deployment runs. It is the fallback, not the daily driver: dev is
+where the work happens, and stable is kept proven so there is something to fall
+back to. Do not develop in it and do not commit there: it moves by
+fast-forward alone.
 
 Both checkouts must stay clean, so never edit either one in place.
 
@@ -48,7 +50,8 @@ One operational warning: restarting the daemon kills every agent session it
 is running, including your own turn, whether you restart it with `update.sh`
 or by hand. Detach the restart and end your turn.
 
-`update.sh` is for **production only**, despite its name reading generally. It
+`update.sh` is for the **stable instance only**, despite its name reading
+generally. It
 fetches from `origin` and restarts `falconfox-daemon` and
 `falconfox-telegram`, so it cannot restart the dev instance, which runs
 unpushed local `dev` from this checkout under `falconfox-dev-daemon` and
@@ -60,4 +63,4 @@ systemd-run --user --collect --unit "falconfox-dev-restart-$(date +%s)" \
     falconfox-dev-daemon.service falconfox-dev-telegram.service
 ```
 
-For production, `update.sh --detach-restart` does the same thing for you.
+For stable, `update.sh --detach-restart` does the same thing for you.

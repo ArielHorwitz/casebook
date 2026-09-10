@@ -17,7 +17,7 @@ or run the manual equivalent): git, curl, Node.js + npm (>=18),
 ## Bootstrap (once, as the deploy user)
 
 ```sh
-REPO=~/projects/falconfox-prod   # the location is free; this host uses this one
+REPO=~/projects/falconfox-stable   # the location is free; this host uses this one
 git clone -b master git@github.com:ArielHorwitz/falconfox.git "$REPO"
 mkdir -p ~/.config/falconfox
 cp "$REPO"/deploy/telegram.env.example ~/.config/falconfox/telegram.env
@@ -89,24 +89,32 @@ Two checkouts on this host, one per instance, each an independent clone:
 | path | branch | instance | units |
 | --- | --- | --- | --- |
 | `~/projects/falconfox` | `dev` | development | `falconfox-dev-daemon`, `falconfox-dev-telegram` |
-| `~/projects/falconfox-prod` | `master` | production | `falconfox-daemon`, `falconfox-telegram` |
+| `~/projects/falconfox-stable` | `master` | stable | `falconfox-daemon`, `falconfox-telegram` |
 
 The **development** checkout is the one an agent lands in, which is why it
 holds `dev`: new work should branch from it without anyone having to first
 work out which of several trees is the right one. Agents develop in
 `.worktrees/` under it and merge back into `dev`, exactly as before.
 
-The **production** checkout exists only to be deployed. Nothing is developed
-there, and it is a separate clone rather than a worktree so that production
-does not share an object store, or a directory that gets moved, with the tree
-agents are editing.
+The **stable** checkout exists only to be deployed. Nothing is developed
+there, and it is a separate clone rather than a worktree so that it does not
+share an object store, or a directory that gets moved, with the tree agents
+are editing.
+
+Which of the two is the *daily driver* is worth saying plainly, because the
+names suggest the opposite. Dev is: it is where the work happens and where the
+sessions live. Stable is the fallback, kept running and proven so there is
+something to fall back **to** when dev breaks. Its capacity is sized for that
+role rather than for a workload, which is why it carries a much smaller
+`max_live_sessions` than dev does.
 
 The two instances are separated by more than the branch: the dev units set
 `XDG_STATE_HOME`/`XDG_CONFIG_HOME` to `~/.local/state/falconfox-dev` and
 `~/.config/falconfox-dev`, so dev has its own config, its own state, its own
-bot token and its own port. Production owns the `falconfox` and
+bot token and its own port. Stable owns the `falconfox` and
 `falconfox-telegram` shims in `~/.local/bin`, so a bare `falconfox` in a shell
-always means production. Dev has its own pair in
+always means stable, which is worth remembering now that dev is the one being
+worked in. Dev has its own pair in
 `~/.local/state/falconfox-dev/bin`, prepended to its units' `PATH` and
 therefore to every dev session's, so an agent there runs the dev CLI against
 the dev daemon rather than the deployment's CLI against it:
@@ -117,7 +125,7 @@ XDG_CONFIG_HOME=~/.config/falconfox-dev \
     ~/projects/falconfox/.venv/bin/falconfox list
 ```
 
-**Ports are pinned, not searched.** Production binds 9721 and dev binds 9725,
+**Ports are pinned, not searched.** Stable binds 9721 and dev binds 9725,
 both passed as `daemon --port` in the units. Unpinned, a daemon searches
 upward from 9721 and takes the first free port, so which instance holds which
 port depends on the order they started in, and it can change on any restart.
@@ -129,7 +137,7 @@ the assignment is a fact and a taken port fails loudly instead.
 Both units are rendered from `deploy/*.service`:
 
 ```sh
-~/projects/falconfox-prod/deploy/setup.sh install-units       # production pair + shims
+~/projects/falconfox-stable/deploy/setup.sh install-units     # stable pair + shims
 ~/projects/falconfox/deploy/setup.sh install-dev-units        # dev pair, no shims
 ```
 
@@ -245,17 +253,17 @@ Python loads code only at process start, so a running daemon is untouched
 until the restart.
 
 `update.sh` follows whatever branch its own checkout is on, so the same script
-serves both: run it in `~/projects/falconfox-prod` to deploy `master`, or in
+serves both: run it in `~/projects/falconfox-stable` to deploy `master`, or in
 `~/projects/falconfox` to move the dev instance to the tip of `dev`.
 
 - **From a FalconFox agent session (Telegram):**
-  `~/projects/falconfox-prod/deploy/update.sh --detach-restart` — pulls and
+  `~/projects/falconfox-stable/deploy/update.sh --detach-restart` — pulls and
   syncs inline, then restarts *detached* a few seconds later, because it kills
   the daemon and with it the agent's own turn. The agent should announce the
   update and end its turn; the session itself survives and resumes on the next
   message. **Any** restart of the daemon an agent is running under cuts that
   agent off mid-turn, `systemctl restart` included, so detach those too.
-- **From SSH:** `~/projects/falconfox-prod/deploy/update.sh` — everything
+- **From SSH:** `~/projects/falconfox-stable/deploy/update.sh` — everything
   inline.
 
 After restarting, the script health-checks (daemon answers `falconfox list`,

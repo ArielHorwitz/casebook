@@ -7,11 +7,13 @@ default_backend = "claude"
 # ACP backend process, so this is a ceiling on host memory rather than on your
 # work: a session over the limit is created *stored* and activates when a slot
 # frees, evicting the least-recently-used idle session to make room. A working
-# session is never evicted. 0 disables the cap.
+# session is never evicted. The client's own manager and private-chat sessions
+# are counted and queued like any other, so this number is the whole budget.
+# 0 disables the cap.
 #
 # Sized for a small VPS. This daemon has been OOM-killed carrying ten sessions
 # on a 951 MB host.
-max_active_sessions = 5
+max_live_sessions = 5
 
 default_always_allow = true
 

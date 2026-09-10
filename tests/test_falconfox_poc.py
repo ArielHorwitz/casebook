@@ -280,7 +280,7 @@ class LiveSessionCapTests(unittest.IsolatedAsyncioTestCase):
 
     def _limit(self, value):
         self.coordinator.config = replace(self.coordinator.config,
-                                          max_active_sessions=value)
+                                          max_live_sessions=value)
 
     async def test_a_slot_is_free_below_the_limit(self):
         self._limit(3)
@@ -308,9 +308,9 @@ class LiveSessionCapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stopped, [])
 
     async def test_a_configured_limit_of_one_means_one(self):
-        # No floor: infrastructure is resumable and evicted last, so a small
-        # limit degrades rather than deadlocking, and the number is honoured
-        # exactly as written.
+        # No floor for infrastructure: it queues for a slot and is evicted
+        # like anything else, so a small limit degrades rather than
+        # deadlocking, and the number is honoured exactly as written.
         self._limit(1)
         self._live("manager", last_active="1", infrastructure=True)
         self.assertTrue(await self.coordinator._ensure_slot())
@@ -328,11 +328,14 @@ class LiveSessionCapTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.coordinator._ensure_slot())
         self.assertEqual(self.stopped, ["infra"], "oldest goes, whatever it is")
 
-    async def test_infrastructure_never_waits_for_a_slot(self):
+    async def test_infrastructure_waits_for_a_slot_like_anything_else(self):
+        # It used to skip the queue outright, so that the manager could be
+        # reached with every session busy. That let the daemon exceed its own
+        # limit to buy a guarantee the client already gives out of band, so
+        # there is no longer a caller that can jump the queue.
         self._limit(3)
         for name in ("a", "b", "c"):
             self._live(name, last_active="1", state="working")
-        self.assertTrue(await self.coordinator._ensure_slot(infrastructure=True))
         self.assertFalse(await self.coordinator._ensure_slot())
         self.assertEqual(self.stopped, [])
 
@@ -363,6 +366,41 @@ class LiveSessionCapTests(unittest.IsolatedAsyncioTestCase):
                                 "state": "idle"})
         await asyncio.sleep(0)
         self.assertEqual(drained, [True])
+
+
+class LiveSessionLimitConfigTests(unittest.TestCase):
+    """Reading the cap out of config.toml, under either spelling of the key."""
+
+    def _load(self, body):
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        directory = Path(home.name).joinpath("falconfox")
+        directory.mkdir()
+        directory.joinpath("config.toml").write_text(body)
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": home.name}):
+            return config.load_config()
+
+    def test_the_current_key_is_read(self):
+        self.assertEqual(self._load("max_live_sessions = 2").max_live_sessions, 2)
+
+    def test_the_old_key_is_still_honoured(self):
+        # The rename must not quietly re-size a host: a config written for a
+        # small number would otherwise fall back to the much larger default.
+        with self.assertLogs("falconfox.config", level="WARNING") as logs:
+            loaded = self._load("max_active_sessions = 1")
+        self.assertEqual(loaded.max_live_sessions, 1)
+        self.assertIn("max_live_sessions", "".join(logs.output))
+
+    def test_the_current_key_wins_over_the_old_one(self):
+        loaded = self._load("max_live_sessions = 2\nmax_active_sessions = 7\n")
+        self.assertEqual(loaded.max_live_sessions, 2)
+
+    def test_an_absent_key_takes_the_default(self):
+        self.assertEqual(self._load("").max_live_sessions,
+                         config.DEFAULT_MAX_LIVE_SESSIONS)
+
+    def test_a_negative_limit_is_floored_at_zero(self):
+        self.assertEqual(self._load("max_live_sessions = -3").max_live_sessions, 0)
 
 
 class EngineTurnTests(unittest.IsolatedAsyncioTestCase):

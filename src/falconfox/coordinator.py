@@ -332,7 +332,7 @@ class SessionCoordinator:
         # A throwaway is hidden by default; infrastructure asks for hidden
         # without asking to be thrown away.
         hidden = bool(ephemeral) if hidden is None else bool(hidden)
-        has_slot = await self._ensure_slot(infrastructure=hidden)
+        has_slot = await self._ensure_slot()
         now = _now_iso()
         if not has_slot:
             self._acp_ids[session_id] = None
@@ -406,12 +406,12 @@ class SessionCoordinator:
         Client infrastructure -- the Telegram manager and its private chat --
         counts, because it is real memory and a limit that omits real
         processes is a lie. Nothing privileges it either: it is hidden but
-        resumable, so it queues for eviction by recency like everything else
-        and wakes on next use, costing a resume rather than its conversation.
+        resumable, so it queues for a slot, and for eviction by recency, like
+        everything else -- costing a resume rather than its conversation.
         """
         return [sid for sid, meta in self._metadata.items() if meta.get("live")]
 
-    async def _ensure_slot(self, *, infrastructure: bool = False) -> bool:
+    async def _ensure_slot(self) -> bool:
         """Make room for one more live session. True if there is room now.
 
         Sessions are the unit of memory cost -- each holds its own ACP backend
@@ -420,22 +420,20 @@ class SessionCoordinator:
         oldest activation would take the session you have had open all day,
         and evicting a working one would destroy a turn in flight.
         """
-        limit = self.config.max_active_sessions
+        limit = self.config.max_live_sessions
         if limit <= 0:
             return True
         live = self.live_session_ids()
         if len(live) < limit:
             return True
-        if infrastructure:
-            # It counts toward the limit, but never waits for one: if the
-            # manager cannot start, the user has no way to stop anything else.
-            return True
         # Plain least-recently-used, with no class of session privileged.
-        # Infrastructure used to sort last, from when stopping it destroyed
-        # its conversation -- but it is resumable now, which makes it the
-        # *cheapest* thing to evict: it wakes on the next message with its
-        # history. Sorting it last meant it held a slot forever, so a limit of
-        # 2 bought exactly one work session.
+        # Infrastructure once skipped this queue outright, so that the manager
+        # was reachable even with every session busy. That made the limit a
+        # number the daemon could exceed, which is the one thing a limit must
+        # not be, and it bought a guarantee the client already provides out of
+        # band: the commands that stop a turn or run a shell are the client's
+        # own, and reach neither the cap nor an agent. So infrastructure waits
+        # like anything else, and its wait ends at the next idle session.
         candidates = sorted(
             (sid for sid in live
              if self._metadata[sid].get("state") == "idle"),
@@ -465,11 +463,11 @@ class SessionCoordinator:
         self._queued[session_id] = text or self._queued.get(session_id)
         live = len(self.live_session_ids())
         self.log.info("session %s queued for a slot (%d live, limit %d)",
-                      session_id, live, self.config.max_active_sessions)
+                      session_id, live, self.config.max_live_sessions)
         self._emit({"type": "notice", "session_id": session_id, "level": "info",
                     "kind": "capacity",
                     "message": f"Waiting for a free session slot — {live} of "
-                               f"{self.config.max_active_sessions} of your "
+                               f"{self.config.max_live_sessions} of your "
                                f"sessions are active and busy. This starts as "
                                f"soon as one goes idle."})
 
@@ -506,7 +504,7 @@ class SessionCoordinator:
         meta = self._require(session_id)
         if meta.get("live"):
             return
-        if not await self._ensure_slot(infrastructure=bool(meta.get("hidden"))):
+        if not await self._ensure_slot():
             self._enqueue(session_id, None)
             return
         path = Path(meta["path"])

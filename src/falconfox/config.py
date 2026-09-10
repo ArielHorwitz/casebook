@@ -46,10 +46,11 @@ DEFAULT_LOG_LEVEL = "INFO"
 #
 # A client's own infrastructure (the Telegram manager and its private chat)
 # counts too: it is real memory, and a limit that omits real processes is a
-# lie. It is also resumable, so it is evicted by recency like anything else
-# and woken on next use -- nothing about it is privileged or protected.
-# Override with a top-level `max_active_sessions = N` in config.toml.
-DEFAULT_MAX_ACTIVE_SESSIONS = 5
+# lie. Nothing about it is privileged either: it waits for a slot and is
+# evicted by recency like anything else, and being resumable, a sleep costs it
+# a resume rather than its conversation.
+# Override with a top-level `max_live_sessions = N` in config.toml.
+DEFAULT_MAX_LIVE_SESSIONS = 5
 
 
 # The instructions handed to the model when asked to name a session. Override it
@@ -247,7 +248,7 @@ class Config:
     # Whether new sessions start with always-allow enabled.
     default_always_allow: bool = False
     # Ceiling on sessions holding a live agent subprocess. See the constant.
-    max_active_sessions: int = DEFAULT_MAX_ACTIVE_SESSIONS
+    max_live_sessions: int = DEFAULT_MAX_LIVE_SESSIONS
     # Action -> key, or a list of keys (the browser binds each to that action).
     hotkeys: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
     ui: dict = field(default_factory=lambda: dict(DEFAULT_UI))
@@ -310,6 +311,18 @@ def load_config() -> Config:
     """
     data = _read_toml(global_config_path())
 
+    # `max_active_sessions` until the key was renamed to match `live` in the
+    # code and to stop colliding with the `idle`/`working` session states. The
+    # old name is still honoured, loudly: a host sized for a small number would
+    # otherwise jump silently to the default on an un-updated config.
+    live_sessions = data.get("max_live_sessions")
+    if live_sessions is None and "max_active_sessions" in data:
+        log.warning("config key `max_active_sessions` has been renamed to "
+                    "`max_live_sessions`; rename it in %s", global_config_path())
+        live_sessions = data["max_active_sessions"]
+    if live_sessions is None:
+        live_sessions = DEFAULT_MAX_LIVE_SESSIONS
+
     backends = builtin_backends()
     backends.update(_parse_backends(data.get("backends", {})))
 
@@ -326,8 +339,7 @@ def load_config() -> Config:
         naming_prompt=data.get("naming_prompt", DEFAULT_NAMING_PROMPT),
         naming_backend=data.get("naming_backend"),
         default_always_allow=bool(data.get("default_always_allow", False)),
-        max_active_sessions=max(0, int(
-            data.get("max_active_sessions", DEFAULT_MAX_ACTIVE_SESSIONS))),
+        max_live_sessions=max(0, int(live_sessions)),
         hotkeys={**DEFAULT_HOTKEYS, **data.get("hotkeys", {})},
         ui=_merge_ui(data.get("ui", {})),
     )
